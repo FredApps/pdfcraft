@@ -1,0 +1,16 @@
+{
+  "base": "d7dd1de647ee186d2161b2c464bdb8bb68f085fb",
+  "head": "fab2e7daacf18e51434683f324d25c96119d0f7b",
+  "platforms": [],
+  "policy": "review-ci-v2.2-no-sonar",
+  "pr": 437,
+  "repository": "storytold/pdfcraft",
+  "source_tree": "b888563799483a5b7d2e5ec84fa0efa918ba898a",
+  "workflows": {
+    ".github/workflows/ci.yml": "756e7129b7e846d8feb98753d568a420231c66c1fff4ef532e5e46e652f05a0f",
+    ".github/workflows/freebsd.yml": "19a0f4dcdef6b60e331ba5334426fb7de55ceb7264020b7680e99a173a0290b0",
+    ".github/workflows/nix.yml": "9654119efb621f0b7482e7f6f8190eb060503e9be3b18ffeee9acc0002908e1f",
+    ".github/workflows/packaging-lint.yml": "3d29d64e15bc248a39be95847860d72bfd65d4e48d96aff16d2cedc8d1eed8b3",
+    ".github/workflows/windows-arm64.yml": "3019a64f1474623bb2b38a3b9caf0413e5e7ced1c8f97301a7a8de6696113e96"
+  }
+}
