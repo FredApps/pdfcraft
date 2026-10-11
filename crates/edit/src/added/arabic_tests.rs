@@ -131,6 +131,18 @@ fn an_item_below_the_old_limit_is_drawn_exactly_as_before() {
     let drawn = draw_laid_arabic(&mut doc, &item(), &laid, &Dict::new(), &mut fonts, &mut out, |id| Ok(boxed(0.5 + f64::from(id) * 0.01)));
     assert!(drawn.is_ok(), "{drawn:?}");
     assert_eq!(fonts.len(), 1);
+    // The stand-in outlines are independent of craft-fonts, but the descriptor still names
+    // the optional face. Check that metadata, then pin only this font's two name fields to
+    // the fallback used by the golden; keep every drawing and resource byte in the check.
+    let font = doc.dict(fonts.iter().next().expect("one generated font").1).expect("generated font dictionary");
+    let descriptor_ref = font.get(b"FontDescriptor").and_then(Object::as_ref).expect("generated font descriptor reference");
+    let mut descriptor = doc.get(descriptor_ref).as_dict().expect("generated font descriptor dictionary").clone();
+    let family = pdfcraft_fonts::document_arabic_font().map_or("Arabic", |f| f.family);
+    assert_eq!(descriptor.get(b"FontName"), Some(&Object::name(&family.replace(' ', ""))));
+    assert_eq!(descriptor.get(b"FontFamily"), Some(&Object::String(PdfString::literal(family.as_bytes()))));
+    descriptor.set(b"FontName".to_vec(), Object::name("Arabic"));
+    descriptor.set(b"FontFamily".to_vec(), Object::String(PdfString::literal(b"Arabic")));
+    doc.set(descriptor_ref, Object::Dict(descriptor));
     let mut bytes = out.clone();
     pdfcraft_cos::serialize(&Object::Dict(fonts.clone()), &mut bytes);
     bytes.extend(snapshot(&doc));
