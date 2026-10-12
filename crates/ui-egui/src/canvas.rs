@@ -2813,6 +2813,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                                 rect[3] = vy;
                             }
                         }
+                        // ScrollArea suppresses its wheel while any widget is dragged. A text
+                        // selection keeps owning the drag, but should still allow wheel scrolling.
+                        // A Line/Page event clears precise_scroll_until. Do not pick up a Point
+                        // gesture's eased tail after its suppression deadline.
+                        if resp.dragged_by(egui::PointerButton::Primary)
+                            && navigation_enabled
+                            && unobstructed
+                            && !single_paging
+                            && view.precise_scroll_until == 0.0
+                            && ui.rect_contains_pointer(navigation_rect)
+                        {
+                            let delta = ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta));
+                            if delta != Vec2::ZERO {
+                                ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
+                            }
+                        }
                     }
                     // A rectangle around no text selects nothing.
                     if resp.drag_stopped()
