@@ -274,6 +274,41 @@ fn theme_commands_and_options_report_preference_and_effective_colours() {
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["theme_preference"], "System");
 }
 
+#[test]
+fn lithuanian_password_dialog_translates_dynamic_labels_and_validation() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({ "key": "language", "value": "lt" }));
+    ok(&mut h, &c, "ui.set", json!({ "key": "dialog", "value": "protect" }));
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::accesskit::Role::RadioButton, "Peržiūrėti");
+    h.get_by_role_and_label(egui::accesskit::Role::RadioButton, "Redaguoti").click();
+    h.run_steps(2);
+    assert!(!h.state().protect_draft.viewing);
+    h.get_by_role_and_label(egui::accesskit::Role::PasswordInput, "Įveskite slaptažodį");
+    h.get_by_role_and_label(egui::accesskit::Role::PasswordInput, "Pakartokite slaptažodį");
+    h.state_mut().protect_draft.password = "abc".into();
+    h.state_mut().protect_draft.confirm = "xyz".into();
+    h.run_steps(2);
+    h.get_by_label("Slaptažodžiai nesutampa.");
+}
+
+#[test]
+fn lithuanian_inspector_title_updates_through_the_control_channel() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({ "key": "panel", "value": "comments" }));
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::accesskit::Role::Tab, "Inspector");
+    let documents = ok(&mut h, &c, "ui.state", json!({}))["documents"].clone();
+    ok(&mut h, &c, "ui.set", json!({ "key": "language", "value": "lt" }));
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::accesskit::Role::Tab, "Inspektorius");
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::Tab, "Inspector").is_none());
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"], documents);
+    ok(&mut h, &c, "ui.set", json!({ "key": "language", "value": "en" }));
+    h.run_steps(2);
+    h.get_by_role_and_label(egui::accesskit::Role::Tab, "Inspector");
+}
+
 /// Switching the interface language changes labels only: documents, their dirty state and the
 /// command ids agents drive stay exactly the same.
 #[test]
@@ -285,7 +320,7 @@ fn language_switch_preserves_document_and_command_ids() {
     let documents = ok(&mut h, &c, "ui.state", json!({}))["documents"].clone();
     assert_eq!(documents[0]["dirty"], true);
     let commands = ok(&mut h, &c, "ui.commands", json!({}));
-    for code in ["ja", "zh-hans", "fr", "de", "uk", "en"] {
+    for code in ["ja", "zh-hans", "fr", "de", "uk", "lt", "en"] {
         ok(&mut h, &c, "ui.set", json!({ "key": "language", "value": code }));
         h.run_steps(2);
         let state = ok(&mut h, &c, "ui.state", json!({}));
@@ -304,7 +339,8 @@ fn language_switch_preserves_document_and_command_ids() {
         h.run_steps(2);
     }
     let error = call(&mut h, &c, "ui.set", json!({ "key": "language", "value": "xx" })).unwrap_err();
-    assert!(error.contains("auto, en, ja"), "{error}");
+    let codes = std::iter::once(i18n::AUTO).chain(i18n::Lang::all().map(i18n::Lang::code)).collect::<Vec<_>>().join(", ");
+    assert_eq!(error, format!("language must be one of {codes}"));
     assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["language"], "en");
 }
 
@@ -1389,7 +1425,7 @@ fn rail_reveals_its_remembered_inactive_inspector_then_closes_the_visible_panel(
 fn control_quit_retains_inactive_fill_sign_typing_after_cancel() {
     let (mut h, c) = harness();
     h.state_mut().views[0].fill_text =
-        Some(pdfcraft_ui_egui::fill_sign::TypeBox { page: 0, at: [40.0, 200.0], text: "Unsaved signature note".into(), focus: false });
+        Some(pdfcraft_ui_egui::fill_sign::TypeBox { page: 0, at: [40.0, 200.0], text: "Unsaved signature note".into(), size: 10.0, focus: false });
     h.state_mut().active = None;
     assert!(!h.state().session.get(h.state().views[0].id).unwrap().dirty);
     assert_eq!(ok(&mut h, &c, "ui.quit", json!({})), json!({"quitting":false,"needs_confirmation":true}));
@@ -1513,4 +1549,53 @@ fn initial_zoom_option_is_applied_before_the_first_viewport_layout() {
         });
         assert_eq!(h.state().views[0].zoom, percent as f32 / 100.0);
     }
+}
+
+/// #1306: a coordinate that only overflows once narrowed to a pointer position is refused by
+/// click and drag, as move refuses it, before any pointer input is queued; the frames that follow
+/// run, and the channel keeps working.
+#[test]
+fn click_and_drag_refuse_coordinates_that_overflow_like_move() {
+    let (mut h, c) = harness();
+    for (method, params) in [
+        ("ui.move", json!({ "x": 1e39, "y": -1e39 })),
+        ("ui.click", json!({ "x": 1e39, "y": -1e39 })),
+        ("ui.click", json!({ "x": 40.0, "y": 1e39 })),
+        ("ui.drag", json!({ "from": [1e39, -1e39], "to": [40.0, 40.0], "steps": 1 })),
+        ("ui.drag", json!({ "from": [40.0, 40.0], "to": [40.0, -1e39], "steps": 1 })),
+        // Each end fits, but not the way from one to the other.
+        ("ui.drag", json!({ "from": [-3e38, 40.0], "to": [3e38, 40.0], "steps": 1 })),
+    ] {
+        let e = call(&mut h, &c, method, params.clone()).expect_err(&format!("{method} {params} is refused"));
+        assert!(e.starts_with(&format!("{method}: ")) && e.contains("finite"), "{e}");
+        h.run_steps(4);
+        assert_eq!(ok(&mut h, &c, "ui.inspect", json!({ "query": "Read", "role": "Button" }))["count"], 1);
+    }
+    let read = ok(&mut h, &c, "ui.inspect", json!({ "query": "Read", "role": "Button" }))["widgets"][0]["rect"].clone();
+    let (x, y) = (read[0].as_f64().unwrap() + 4.0, read[1].as_f64().unwrap() + 4.0);
+    assert_eq!(ok(&mut h, &c, "ui.click", json!({ "x": x, "y": y }))["clicked"], json!([x, y]));
+    ok(&mut h, &c, "ui.drag", json!({ "from": [x, y], "to": [x + 10.0, y], "steps": 2 }));
+}
+
+#[test]
+fn page_size_shows_while_the_pointer_is_in_the_bottom_left_quadrant() {
+    let (mut h, _c) = harness();
+    let area = h.state().views[0].viewport_rect();
+    let shown = |h: &Harness<'static, PdfCraftApp>| {
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("page-size-hint"));
+        h.ctx.memory(|m| m.areas().visible_last_frame(&layer))
+    };
+    let away = area.center() + egui::vec2(300.0, -200.0);
+    h.event(egui::Event::PointerMoved(away));
+    h.run_steps(3);
+    assert!(!shown(&h), "top-right: hidden");
+    h.event(egui::Event::PointerMoved(area.left_bottom() + egui::vec2(80.0, -80.0)));
+    h.run_steps(3);
+    assert!(shown(&h), "bottom-left: shown");
+    if let Ok(dir) = std::env::var("PDFCRAFT_SHOT_DIR") {
+        h.render().unwrap().save(format!("{dir}/page-size-hint.png")).unwrap();
+    }
+    h.event(egui::Event::PointerMoved(away));
+    h.run_steps(3);
+    assert!(!shown(&h), "pointer left: hidden again");
 }

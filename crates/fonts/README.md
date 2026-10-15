@@ -4,9 +4,11 @@ Layer L2. Font helpers for the appearance streams PdfCraft generates (comments, 
 
 Today it holds what generated appearances need without a font program:
 
-- `helvetica_width`: an approximation of Helvetica's proportions by character class. No metrics
-  file or font program from any vendor is bundled; widths are PdfCraft's own estimates, good
-  enough for line breaking and alignment, not for typesetting.
+- `helvetica_width`: the **exact** standard-14 advance widths, via `Std14::Helvetica`. It was an
+  estimate by character class until the generated tables landed; those tables are Adobe-authored
+  non-visual technical data, the item `AGENTS.md` §1.1 permits, carried in `std14_metrics.rs` with
+  `adobe_data = true` in `ATTRIBUTION.toml`. **No font program or typeface from any vendor is
+  bundled** — widths and encodings only. Reach for `Std14` directly for any other face.
 - `wrap`: greedy line breaking with that measure (paragraphs on newlines, long words split).
 - `win_ansi`: Unicode → WinAnsiEncoding bytes (`?` for characters it can't represent), and
   `literal` to write bytes as a PDF literal string. Nothing writes that `?` silently. Callers
@@ -45,7 +47,7 @@ set). Without that variable `CRAFT_FONTS` is empty and everything below copes:
   default `document_japanese_font` / `japanese_glyph` APIs still use regular document Mincho.
 - `document_arabic_font` / `shape_arabic` / `arabic_glyph`: the first `Arab` face, shaped with
   harfrust (joining forms, ligatures, mark positions) into clusters for Arabic text written into
-  PDFs; the editor draws each cluster as one Type 3 glyph with a ToUnicode entry. Without the face
+  PDFs; the editor draws each cluster as one Type 3 glyph with a ToUnicode entry and per-line ActualText for logical copy/search order. Without the face
   they return `GlyphError::NoFont` and the editor reports a clear error.
 - `document_japanese_fonts_for_style`: every `Jpan` face in that order of preference, so the
   editor can use the first one that has all of the replacement's glyphs (the faces differ in
