@@ -11,12 +11,15 @@ fn harness() -> Harness<'static, PdfCraftApp> {
 }
 
 fn harness_with_step_dt(step_dt: f32) -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(step_dt).build_eframe(|_cc| {
-    harness_bytes(include_bytes!("data/form.pdf").to_vec())
+    harness_bytes_with_step_dt(include_bytes!("data/form.pdf").to_vec(), step_dt)
 }
 
 fn harness_bytes(bytes: Vec<u8>) -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+    harness_bytes_with_step_dt(bytes, 0.25)
+}
+
+fn harness_bytes_with_step_dt(bytes: Vec<u8>, step_dt: f32) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(step_dt).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.open_bytes("form.pdf", None, bytes.clone()).unwrap();
