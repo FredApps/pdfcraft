@@ -9,7 +9,7 @@
 > **Last reviewed:** 2026-10-23 | **Last updated:** 2026-10-23 | **Change:** minor (M10: table spans retain text from covered slots in Office exports; estimates unchanged)
 > **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M10: image export preserves soft-mask Decode opacity ranges; estimates unchanged)
 > **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M10: vector printing preserves existing page XObjects when adding annotation appearances; estimates unchanged)
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M12 #3673: Character encoding accepts Identity-H/V with Adobe CJK collections; estimates unchanged)
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M7 #2517: a blank line stays a paragraph break; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 > **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M10, #3532 partial: vector printing retains existing appearances with absent Subtype; estimates unchanged)
 
@@ -265,6 +265,7 @@ Estimates unchanged.
 | 2026-10-21 | minor | M3: on GNOME/Wayland, a second resize by an edge or move by the tab strip works without a click in between (the compositor kept the button's release from egui). Estimates unchanged. |
 | 2026-10-22 | minor | M4, #3916 partial: edits and Undo/Redo cancel Organize page drags. Pointer-release and save/reopen regressions check page order. Estimates unchanged. |
 | 2026-10-22 | minor | M14 #3558: rebased macOS association recovery; reuse #3042 shared metadata preservation instead of a duplicate save wrapper. Estimates unchanged. |
+| 2026-10-15 | minor | M7 #2517: a blank line between paragraphs stays a paragraph break, and growing the first paragraph does not absorb the next one. Estimates unchanged. |
 | 2026-10-20 | minor | M4: initial-view window and interface options resolve indirect boolean ViewerPreferences values; synthetic true/false and save/reopen regressions retain defaults for malformed entries. Estimates unchanged. |
 | 2026-10-21 | minor | M3, #3808: the Pages inspector has an independent 50–150% thumbnail size slider and buttons; selection and current-page following are retained, with headless ui.set coverage. Estimates unchanged. |
 | 2026-10-20 | minor | M11 #3507: image merging preserves comments and state across content streams. Estimates unchanged. |
