@@ -44,13 +44,8 @@ fn harness_with(pdf: Vec<u8>, setup: impl FnOnce(&mut PdfCraftApp) + 'static) ->
         setup(&mut app);
         app
     });
-    for _ in 0..200 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    // Wait for the text layer itself (#1277), not for a fixed second.
+    crate::support::wait_until(&mut h, "the page's text layer", |app| app.views[0].glyph_screen_pos(0, 5).is_some() && !app.render_pending());
     let at = h.state().views[0].glyph_screen_pos(0, 5).expect("text layer loaded");
     h.hover_at(at);
     h.run_steps(1);
@@ -97,16 +92,12 @@ fn quick_clicks_with_the_highlighter_mark_only_the_word() {
         }
     }
     h.run_steps(3);
-    // Under load the mark can land a few frames later; wait for it (egui's clock is fixed per
-    // frame, so waiting can't turn the clicks into a different run).
-    for _ in 0..200 {
-        let app = h.state();
-        if app.session.get(app.views[0].id).is_some_and(|d| !d.info.annotations.is_empty()) && !app.render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        h.run_steps(1);
-    }
+    // Under load the mark can land later; wait for it (egui's clock is fixed per frame, so
+    // waiting can't turn the clicks into a different run). By state, not for a fixed second
+    // (#1277).
+    crate::support::wait_until(&mut h, "the highlight and the page after it", |app| {
+        app.session.get(app.views[0].id).is_some_and(|d| !d.info.annotations.is_empty()) && !app.render_pending()
+    });
     let app = h.state();
     let doc = app.session.get(app.views[0].id).unwrap();
     let marks: Vec<(&str, usize)> = doc.info.annotations.iter().map(|a| (a.subtype.as_str(), a.quads.len())).collect();
@@ -506,4 +497,50 @@ fn a_triple_click_drag_extends_by_whole_lines() {
     click(&mut h, at);
     double_click_drag(&mut h, at, below);
     assert_eq!(h.state().views[0].selected_text().as_deref(), Some("The quick brown fox\njumps over the dog"));
+}
+
+/// Coalesced down/up keeps the same word/line selection as separate press and release passes.
+#[test]
+fn coalesced_primary_clicks_select_line_then_spaced_click_clears() {
+    for coalesced in [true, false] {
+        let (mut h, at) = harness(|_| {});
+        h.ctx.options_mut(|o| o.max_passes = 1.try_into().unwrap());
+        let id = h.state().views[0].id;
+        let saved = h.state().session.get(id).unwrap().saved_bytes();
+        assert!(h.state().views[0].selected_text().is_none());
+        assert!(!h.state().session.get(id).unwrap().dirty);
+        for want in [None, Some("quick"), Some("The quick brown fox")] {
+            if coalesced {
+                // Harness::event steps each queued event separately; RawInput keeps this pair together.
+                h.input_mut().events.extend([true, false].map(|pressed| Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                }));
+                h.step();
+            } else {
+                click(&mut h, at);
+            }
+            assert_eq!(h.state().views[0].selected_text().as_deref(), want, "coalesced={coalesced}");
+        }
+        h.run_steps(60);
+        if coalesced {
+            h.input_mut().events.extend([true, false].map(|pressed| Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }));
+            h.step();
+        } else {
+            click(&mut h, at);
+        }
+        assert_eq!(h.state().views[0].selected_text(), None, "a spaced click clears either gesture path");
+        assert_eq!(h.state().views[0].id, id);
+        let doc = h.state().session.get(id).unwrap();
+        assert!(!doc.dirty);
+        assert_eq!((doc.can_undo(), doc.can_redo()), (None, None));
+        assert_eq!(doc.saved_bytes(), saved);
+    }
 }
