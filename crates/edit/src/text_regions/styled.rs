@@ -796,6 +796,14 @@ pub(crate) fn rewrite_styled_block(
         .ok_or_else(|| EditError::Invalid("the paragraph is drawn in a space it cannot be edited in".into()))?;
     let (tx, ty) = back.apply(dx, dy);
     block_ops.push(Op::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(tx), n(ty)]));
+    // A new row can land one leading above the next paragraph and look like the same
+    // paragraph. When every row is in this rewrite, a paragraph marker keeps them in one
+    // scope so the neighbour stays out (#2517). A row left in the source stream cannot share
+    // that marker, so it is omitted and geometry groups those rows as before.
+    let marked = kept.iter().all(|row| !*row);
+    if marked {
+        block_ops.push(Op::new("BMC", vec![Object::name("P")]));
+    }
     let crop = p.crop(doc);
     let centered = is_centred(block, lines, (crop[0] + crop[2]) / 2.0, first.size);
     let source_leading = block
@@ -965,6 +973,9 @@ pub(crate) fn rewrite_styled_block(
         } else {
             style.line_spacing.unwrap_or(1.5).clamp(0.5, 5.0) * style.size.unwrap_or(anchor.size)
         };
+    }
+    if marked {
+        block_ops.push(Op::new("EMC", vec![]));
     }
     block_ops.push(Op::new("Q", vec![]));
     block_ops.extend(after.ops());

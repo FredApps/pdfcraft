@@ -253,11 +253,12 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
                 || ((pr[0] + pr[2] - frame[0] - frame[2]) / 2.0).abs() < tol
                 || (pr[2] - frame[2]).abs() < tol
                 || hanging;
-            // Once a paragraph has two rows, its own leading is known. A blank line is about
-            // twice that, so a wider gap is the next paragraph (#2517). A single row has no
-            // leading yet: ordinary leading (about 1.2 × the size) and double spacing (2 × the
-            // size) still join, and a blank line (2.4 × the size) does not. The old cap of
-            // 2.5 × the size joined the blank line too.
+            // Once a paragraph has two rows, its own leading is the measured baseline gap. A
+            // blank line is about twice that, so a wider gap is the next paragraph (#2517). A
+            // single row uses the text object's TL when it has one: a gap equal to that TL
+            // joins, and a gap of twice the TL does not. Without a TL, ordinary leading still
+            // joins and a gap of 2.4 × the size does not. The old cap of 2.5 × the size joined
+            // the blank line too.
             let own_leading = block.rows.len().checked_sub(2).and_then(|i| {
                 let above = block.rows.get(i)?.first().and_then(|n| lines.get(*n));
                 let below = prev_row.first().and_then(|n| lines.get(*n));
@@ -266,9 +267,8 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
                     _ => None,
                 }
             });
-            // 2.05 keeps a double-spaced row (gap == 2 × size) in the paragraph and still
-            // rejects a blank line, which is 2.4 × the size.
-            let max_gap = own_leading.filter(|lead| *lead > tol * 0.4).map_or(tol * 2.05, |lead| lead * 1.5);
+            let stated = (prev.origin.state.leading > 0.0).then(|| prev.wrap_leading()).filter(|lead| lead.is_finite() && *lead > tol * 0.4);
+            let max_gap = own_leading.filter(|lead| *lead > tol * 0.4).or(stated).map_or(tol * 2.05, |lead| lead * 1.5);
             // OCR lines stay apart: the scan fixes where each one is, so they never rewrap together.
             (!mixed || !(invisible(prev) || invisible(first)))
                 && (mixed || same_style(prev, first))
