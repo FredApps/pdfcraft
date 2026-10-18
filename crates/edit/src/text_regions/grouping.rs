@@ -227,9 +227,10 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
         }
     }
     let mut blocks: Vec<TextBlock> = Vec::new();
-    for row in rows {
+    for row_at in 0..rows.len() {
+        let Some(row) = rows.get(row_at) else { continue };
         let Some(first) = row.first().and_then(|i| lines.get(*i)) else { continue };
-        let (Some(rect), Some(frame)) = (row_rect(&row, lines), frame_row_rect(&row, lines)) else { continue };
+        let (Some(rect), Some(frame)) = (row_rect(row, lines), frame_row_rect(row, lines)) else { continue };
         let joins = blocks.last().is_some_and(|block| {
             // A bullet of its own opens a list item (#2564): such a row is a new paragraph, and
             // letting it join is what made an edit of the row above delete this item and the ones
@@ -256,9 +257,10 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
             // Once a paragraph has two rows, its own leading is the measured baseline gap. A
             // blank line is about twice that, so a wider gap is the next paragraph (#2517). A
             // single row uses the text object's TL when it has one: a gap equal to that TL
-            // joins, and a gap of twice the TL does not. Without a TL, ordinary leading still
-            // joins and a gap of 2.4 × the size does not. The old cap of 2.5 × the size joined
-            // the blank line too.
+            // joins, and a gap of twice the TL does not. `Td` does not set TL (`TD` does). A
+            // step that repeats on the following row is that leading; one large gap, with no
+            // second step to compare, stays a break. The old cap of 2.5 × the size joined the
+            // blank line too.
             let own_leading = block.rows.len().checked_sub(2).and_then(|i| {
                 let above = block.rows.get(i)?.first().and_then(|n| lines.get(*n));
                 let below = prev_row.first().and_then(|n| lines.get(*n));
@@ -268,7 +270,20 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
                 }
             });
             let stated = (prev.origin.state.leading > 0.0).then(|| prev.wrap_leading()).filter(|lead| lead.is_finite() && *lead > tol * 0.4);
-            let max_gap = own_leading.filter(|lead| *lead > tol * 0.4).or(stated).map_or(tol * 2.05, |lead| lead * 1.5);
+            // The next row is not in this block yet. Its gap is only a leading when it matches
+            // this one: a blank line is a single wider gap and has no matching step after it.
+            let repeated = rows.get(row_at.saturating_add(1)).and_then(|next| {
+                let nfirst = next.first().and_then(|i| lines.get(*i))?;
+                let nframe = frame_row_rect(next, lines)?;
+                let ngap = first.frame_origin().1 - nfirst.frame_origin().1;
+                let same = same_plane(first, nfirst)
+                    && (mixed || same_style(first, nfirst))
+                    && first.size.min(nfirst.size) >= first.size.max(nfirst.size) * 0.4
+                    && (nframe[0] - frame[0]).abs() < tol;
+                let scale = gap.abs().max(ngap.abs());
+                if same && ngap > tol * 0.8 && scale < tol * 4.0 && (ngap - gap).abs() <= scale * 0.08 + 0.5 { Some(gap) } else { None }
+            });
+            let max_gap = own_leading.filter(|lead| *lead > tol * 0.4).or(stated).or(repeated).map_or(tol * 2.05, |lead| lead * 1.5);
             // OCR lines stay apart: the scan fixes where each one is, so they never rewrap together.
             (!mixed || !(invisible(prev) || invisible(first)))
                 && (mixed || same_style(prev, first))
@@ -302,7 +317,7 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
         if !block.rows.is_empty() {
             block.editor_text.push('\n');
         }
-        for &index in &row {
+        for &index in row {
             let Some(line) = lines.get(index) else { continue };
             // Some producers position separate words without encoding a space.
             if let Some(prev) = block.lines.last().filter(|i| row.contains(i)).and_then(|i| lines.get(*i))
@@ -329,7 +344,7 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
         }
         block.text.push_str(row_text.trim_matches(paragraph_separator));
         block.rect = union(block.rect, rect);
-        block.rows.push(row);
+        block.rows.push(row.clone());
     }
     blocks
 }

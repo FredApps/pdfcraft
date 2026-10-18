@@ -609,6 +609,22 @@ fn untouched_rows(block: &TextBlock, draft: &str, rows: &[std::ops::Range<usize>
         .collect()
 }
 
+/// Operator index of the paragraph's first text object, and of the next line's text object
+/// when one follows. The next index is where a closing marker belongs.
+fn paragraph_span(block: &TextBlock, lines: &[TextLine]) -> Option<(usize, Option<usize>)> {
+    let belongs: std::collections::HashSet<usize> = block.lines.iter().copied().collect();
+    let start = block.lines.iter().filter_map(|i| lines.get(*i)).map(|line| line.origin.bt_op).min()?;
+    let end =
+        block.lines.iter().filter_map(|i| lines.get(*i)).flat_map(|line| line.ops.iter().copied().chain(std::iter::once(line.origin.bt_op))).max()?;
+    let next = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !belongs.contains(index))
+        .filter_map(|(_, line)| (line.origin.bt_op > end).then_some(line.origin.bt_op))
+        .min();
+    Some((start, next))
+}
+
 struct RewriteAnchor<'a> {
     lead: &'a TextLine,
     drop: std::collections::HashSet<usize>,
@@ -985,7 +1001,26 @@ pub(crate) fn rewrite_styled_block(
         block_ops.push(Op::new("Tm", o.tlm.iter().map(|v| n(*v)).collect()));
     }
     let at = if split { start } else { o.bt_op };
-    let data = splice(&pieces, &ops, |i| (if i == at { std::mem::take(&mut block_ops) } else { Vec::new() }, !drop.contains(&i)));
+    // A kept source row sits outside `block_ops`, so a marker only around the rewrite splits
+    // the paragraph or leaves the added row to join the neighbour. Bound the whole paragraph:
+    // from its first text object up to, but not including, the next line.
+    let marker = if marked { None } else { paragraph_span(block, lines) };
+    if marker.is_some_and(|(_, next)| next.is_none()) {
+        block_ops.push(Op::new("EMC", vec![]));
+    }
+    let data = splice(&pieces, &ops, |i| {
+        let mut insert = Vec::new();
+        if marker.is_some_and(|(start_at, _)| i == start_at) {
+            insert.push(Op::new("BMC", vec![Object::name("P")]));
+        }
+        if i == at {
+            insert.append(&mut block_ops);
+        }
+        if marker.is_some_and(|(_, next)| next == Some(i)) {
+            insert.push(Op::new("EMC", vec![]));
+        }
+        (insert, !drop.contains(&i))
+    });
     let contents = rewritten_contents(doc, &streams, data);
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     doc.update_dict(p.obj, |d| {
