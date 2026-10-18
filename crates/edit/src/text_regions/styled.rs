@@ -405,9 +405,12 @@ fn wrap_styled_rows(
     chars: &[StyledChar],
     width: f64,
     measure: impl Fn(&[StyledChar]) -> Result<f64, EditError>,
-) -> Result<(StyledRows, RowRanges), EditError> {
+) -> Result<(StyledRows, RowRanges, Vec<bool>), EditError> {
     let mut rows: Vec<Vec<StyledChar>> = Vec::new();
     let mut row_ranges = Vec::new();
+    // True when this row starts because the previous word did not fit, not because of a newline.
+    let mut row_soft = Vec::new();
+    let mut next_soft = false;
     let mut row_start = 0;
     let mut row = Vec::new();
     let mut row_width = 0.0;
@@ -419,6 +422,8 @@ fn wrap_styled_rows(
             continue;
         }
         if item.0 == '\n' {
+            row_soft.push(next_soft);
+            next_soft = false;
             row_ranges.push(row_start..row_start + row.len());
             rows.push(std::mem::take(&mut row));
             row_width = 0.0;
@@ -442,6 +447,8 @@ fn wrap_styled_rows(
             while row.last().is_some_and(|c: &StyledChar| c.0.is_whitespace()) {
                 row.pop();
             }
+            row_soft.push(next_soft);
+            next_soft = true;
             row_ranges.push(row_start..row_start + row.len());
             rows.push(std::mem::take(&mut row));
             row_width = 0.0;
@@ -452,10 +459,11 @@ fn wrap_styled_rows(
         at = end;
     }
     if !row.is_empty() {
+        row_soft.push(next_soft);
         row_ranges.push(row_start..row_start + row.len());
         rows.push(row);
     }
-    Ok((rows, row_ranges))
+    Ok((rows, row_ranges, row_soft))
 }
 
 fn apply_range_styles<'a>(
@@ -822,7 +830,7 @@ pub(crate) fn rewrite_styled_block(
         }
         Ok(width)
     };
-    let (rows, row_ranges) = wrap_styled_rows(&chars, width, measure)?;
+    let (rows, row_ranges, row_soft) = wrap_styled_rows(&chars, width, measure)?;
     let streams = content_streams(doc, &p.dict)?;
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
@@ -890,6 +898,14 @@ pub(crate) fn rewrite_styled_block(
             // Kept rows only occur without spacing or size changes, so this is the step below.
             baseline -= source_leading;
             continue;
+        }
+        if !row.is_empty() && row_index > 0 {
+            // An empty marker between lines. `/PCSoft` is a wrap and rejoins when the box
+            // widens. `/PCHard` is a newline that was already in the text. Neither is a
+            // paragraph region, so the lines stay in one scope.
+            let name = if row_soft.get(row_index).copied().unwrap_or(false) { "PCSoft" } else { "PCHard" };
+            block_ops.push(Op::new("BMC", vec![Object::name(name)]));
+            block_ops.push(Op::new("EMC", vec![]));
         }
         let w = measured.get(row_index).copied().unwrap_or(0.0);
         let align = style.align.unwrap_or(if centered { crate::added::Align::Center } else { crate::added::Align::Left });

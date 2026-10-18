@@ -579,13 +579,28 @@ impl LineWriter<'_> {
     }
 
     /// Writes one wrapped line, returning its underline (x0, x1, y) in text space.
-    fn write_line(&self, index: usize, line: &str, last: bool, cursor: &mut LineCursor, ops: &mut Vec<Op>) -> Result<(f64, f64, f64), EditError> {
+    fn write_line(
+        &self,
+        index: usize,
+        line: &str,
+        soft: bool,
+        last: bool,
+        cursor: &mut LineCursor,
+        ops: &mut Vec<Op>,
+    ) -> Result<(f64, f64, f64), EditError> {
         let n = pdfcraft_content::num;
         let body = line.trim_matches(' ');
         let interior = body.matches(' ').count();
         let tw = self.stretch(body, last);
         let (shown, visible) = self.shown(line, body, tw);
         let dx = if tw > 0.0 { 0.0 } else { self.alignment.offset(visible) };
+        if index > 0 {
+            // Inside this text object, so the marker starts and ends here. `/PCSoft` rejoins
+            // when the box widens. `/PCHard` is a newline that was already in the text.
+            let name = if soft { "PCSoft" } else { "PCHard" };
+            ops.push(Op::new("BMC", vec![Object::name(name)]));
+            ops.push(Op::new("EMC", vec![]));
+        }
         if index > 0 || dx != 0.0 {
             ops.push(Op::new("Td", vec![n(dx - cursor.x), n(if index > 0 { -self.lead } else { 0.0 })]));
         }
@@ -633,8 +648,12 @@ impl LineWriter<'_> {
     }
 
     /// Writes every wrapped line, returning their underlines.
-    fn write_all(&self, wrapped: &[String], cursor: &mut LineCursor, ops: &mut Vec<Op>) -> Result<Vec<(f64, f64, f64)>, EditError> {
-        wrapped.iter().enumerate().map(|(i, line)| self.write_line(i, line, i + 1 == wrapped.len(), cursor, ops)).collect()
+    fn write_all(&self, wrapped: &[(String, bool)], cursor: &mut LineCursor, ops: &mut Vec<Op>) -> Result<Vec<(f64, f64, f64)>, EditError> {
+        wrapped
+            .iter()
+            .enumerate()
+            .map(|(i, (line, soft))| self.write_line(i, line, *soft, i + 1 == wrapped.len(), cursor, ops))
+            .collect()
     }
 }
 
@@ -653,7 +672,7 @@ struct BlockPlan<'a> {
     underline: bool,
 }
 
-fn block_ops(plan: &BlockPlan<'_>, writer: &LineWriter<'_>, wrapped: &[String], show_font: String) -> Result<Vec<Op>, EditError> {
+fn block_ops(plan: &BlockPlan<'_>, writer: &LineWriter<'_>, wrapped: &[(String, bool)], show_font: String) -> Result<Vec<Op>, EditError> {
     let n = pdfcraft_content::num;
     let mut ops = vec![Op::new("q", vec![])];
     ops.extend(reveal_ops(plan.block, plan.lines, plan.style, plan.emit.ctm)?);

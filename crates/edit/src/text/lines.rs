@@ -280,6 +280,8 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
                 clips: s.state.render_mode >= 4,
                 unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
                 runs: vec![(s.text.clone(), s.ink.len(), false)],
+                soft_break: s.soft_break,
+                hard_break: s.hard_break,
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -394,6 +396,8 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             clips: s.state.render_mode >= 4,
             unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
             runs: vec![(s.text.clone(), s.ink.len(), false)],
+            soft_break: s.soft_break,
+            hard_break: s.hard_break,
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,

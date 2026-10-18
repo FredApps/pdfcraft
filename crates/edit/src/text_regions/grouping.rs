@@ -299,6 +299,7 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
             blocks.push(TextBlock {
                 text: String::new(),
                 editor_text: String::new(),
+                reflow_text: String::new(),
                 spans: Vec::new(),
                 rect,
                 base_font: first.base_font.clone(),
@@ -346,5 +347,53 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
         block.rect = union(block.rect, rect);
         block.rows.push(row.clone());
     }
+    for block in &mut blocks {
+        block.reflow_text = reflow_text(block, lines);
+    }
     blocks
+}
+
+/// The text a width change should reflow. A `/PCSoft` line is a wrap and rejoins. A `/PCHard`
+/// line, or a short line that is not marked, keeps its newline. An unmarked line that reaches
+/// the paragraph's right edge and is wide enough to be a measure rejoins too: that is how a
+/// file written elsewhere wraps a body line.
+fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
+    let parts: Vec<&str> = block.editor_text.split('\n').collect();
+    if parts.len() != block.rows.len() {
+        return block.editor_text.clone();
+    }
+    let mut out = String::new();
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 {
+            if break_is_soft(block, lines, index) {
+                if out.ends_with('-') {
+                    out.pop();
+                } else if !out.ends_with(char::is_whitespace) {
+                    out.push(' ');
+                }
+            } else {
+                out.push('\n');
+            }
+        }
+        out.push_str(part);
+    }
+    out
+}
+
+fn break_is_soft(block: &TextBlock, lines: &[TextLine], row_index: usize) -> bool {
+    let Some(line) = block.rows.get(row_index).and_then(|row| row.first()).and_then(|i| lines.get(*i)) else { return false };
+    if line.hard_break {
+        return false;
+    }
+    if line.soft_break {
+        return true;
+    }
+    let Some(prev) = block.rows.get(row_index.wrapping_sub(1)).and_then(|row| row_rect(row, lines)) else { return false };
+    let Some(next) = block.rows.get(row_index).and_then(|row| row_rect(row, lines)) else { return false };
+    let size = line.size.max(1.0);
+    let slack = block.rect[2] - prev[2];
+    let width = prev[2] - prev[0];
+    // Short rows define the right edge by their own letters. A body line that fills the
+    // measure leaves almost no room for the next word.
+    slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack
 }

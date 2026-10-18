@@ -301,6 +301,9 @@ pub(super) struct Shown {
     pub(super) paint: Paint,
     pub(super) logical_order: bool,
     pub(super) actual_text: bool,
+    /// Set when a `/PCSoft` or `/PCHard` marker was seen since the previous text line.
+    pub(super) soft_break: bool,
+    pub(super) hard_break: bool,
 }
 
 impl Shown {
@@ -546,6 +549,8 @@ struct TextRunState<'a> {
     marked: &'a MarkedContent,
     carry: &'a mut Carry,
     out: &'a mut Vec<Shown>,
+    soft_break: bool,
+    hard_break: bool,
 }
 
 fn show_text(op: &Op, i: usize, state: &mut TextRunState<'_>) -> Result<(), EditError> {
@@ -742,6 +747,8 @@ fn show_text(op: &Op, i: usize, state: &mut TextRunState<'_>) -> Result<(), Edit
         paint: Paint { layers: marked.layers.iter().flatten().cloned().collect(), gs: ts.gs.clone() },
         logical_order: false,
         actual_text: false,
+        soft_break: state.soft_break,
+        hard_break: state.hard_break,
     });
     Ok(())
 }
@@ -766,11 +773,22 @@ pub(super) fn interpret(
     let mut bt = 0usize;
     let mut marked =
         MarkedContent { regions: std::mem::take(&mut carry.marked), layers: std::mem::take(&mut carry.layers), ..MarkedContent::default() };
+    // A rewrite names a wrap (`/PCSoft`) or a break it kept (`/PCHard`) in an empty marker
+    // before the next line. Neither name is a paragraph region, so it does not change scope.
+    let mut soft_break = false;
+    let mut hard_break = false;
     for (i, op) in ops.iter().enumerate() {
         match op.op.as_slice() {
             // No depth cap: every `EMC` pops, so a capped push would pair it with the enclosing
             // sequence (#3573). Both stacks stay bounded by the number of operators.
             b"BMC" | b"BDC" => {
+                if op.name(0) == Some(b"PCSoft") {
+                    soft_break = true;
+                    hard_break = false;
+                } else if op.name(0) == Some(b"PCHard") {
+                    hard_break = true;
+                    soft_break = false;
+                }
                 marked.begin(doc, op, i, logical_text, out.len());
             }
             b"EMC" => {
@@ -875,8 +893,26 @@ pub(super) fn interpret(
                 tm = tlm;
             }
             b"Tj" | b"TJ" | b"'" | b"\"" => {
-                let mut state = TextRunState { ts: &mut ts, tm: &mut tm, tlm: &mut tlm, at_bt: &at_bt, bt, marked: &marked, carry, out: &mut out };
+                let before = out.len();
+                let mut state = TextRunState {
+                    ts: &mut ts,
+                    tm: &mut tm,
+                    tlm: &mut tlm,
+                    at_bt: &at_bt,
+                    bt,
+                    marked: &marked,
+                    carry,
+                    out: &mut out,
+                    soft_break,
+                    hard_break,
+                };
                 show_text(op, i, &mut state)?;
+                // A numeric-only TJ adjustment shows no glyphs and pushes nothing: the break
+                // belongs to whichever text-showing operator comes next.
+                if out.len() > before {
+                    soft_break = false;
+                    hard_break = false;
+                }
             }
             _ => {}
         }
