@@ -170,7 +170,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
-- **2026-10-19 (M5, snap to drawing):** The drawing tools (connected lines, polygons, clouds, lines, arrows, rectangles, ovals) snap to the page's own vector paths when Snap to drawing is on (F3, or the quick-bar button; remembered): endpoints, midpoints, intersections and paths within 6 screen points, with the measuring tools' green marker and target name, Shift for 45° segments. Same extraction as measurement snapping (`pdfcraft_measure::snap`), cached per page and edit generation in the comment view. `comment_add` takes `snap: true` (and `snap_tolerance`). Estimates unchanged.
+- **2026-10-19 (M5, snap to drawing):** The drawing tools (connected lines, polygons, clouds, lines, arrows, rectangles, ovals) snap to the page's own vector paths when Snap to drawing is on (F3, or the quick-bar button; remembered): endpoints, midpoints, intersections and paths within 6 screen points, with the measuring tools' green marker and target name, Shift for 45° segments. Same extraction as measurement snapping (`pdfcraft_measure::snap`), cached per page and edit generation in the comment view; its limits now have room for an A0 CAD plan (two million segments and 256 MiB of content per page, where the old 20,000 kept only the frame) and a grid of cells keeps a query under a millisecond there (27 ms before), for measuring too. `comment_add` takes `snap: true` (and `snap_tolerance`). Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
