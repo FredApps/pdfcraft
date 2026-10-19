@@ -307,9 +307,12 @@ update the numbers.
 - **Related, not part of this estimate: language-aware order of user text.** Comments (sort,
   author filter, search), Summarize Comments, form "Sort items", Combine and the bookmark filter
   sort in the order of the interface language (CLDR `vi` for Vietnamese, Root otherwise) and treat
-  NFC and NFD as equal (`pdfcraft-collate`); headless sessions get Root order with NFC = NFD.
-  Still missing: Find and Search & Redact keep the plain case-fold (no NFC match; they map hits
-  back to glyph positions), scripts other than Latin are not unified, and the comment summary
+  NFC and NFD as equal (`pdfcraft-collate`); the Vietnamese order applies when the interface
+  language is Vietnamese (the bookmark filter matches but does not sort), and every other language
+  and headless sessions get Root order with NFC = NFD, which puts letters such as Czech `č` beside
+  `c` instead of after `z`.
+  Still missing: Find, Search & Redact and the command palette keep the plain case-fold (no NFC
+  match; Find and Search & Redact map hits back to glyph positions), scripts other than Latin are not unified, and the comment summary
   report's font does not draw every Vietnamese letter.
 
 ### 15. Forms: JavaScript object model, actions, submit, XFA depth
@@ -390,7 +393,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | Gap 14: user-visible lists sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as equal: Comments (sort, author filter, search), Summarize Comments, form "Sort items", Combine, the bookmark filter. Headless sessions get Root order with NFC = NFD; only Find and Search & Redact and scripts other than Latin keep the old behaviour. Estimates unchanged. |
+| 2026-10-19 | minor | Gap 14: user-visible lists sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as equal: Comments (sort, author filter, search), Summarize Comments, form "Sort items", Combine, the bookmark filter. The Vietnamese order applies when the interface language is Vietnamese; other languages and headless sessions get Root order with NFC = NFD; only Find, Search & Redact, the command palette and scripts other than Latin keep the old behaviour. Estimates unchanged. |
 | 2026-10-15 | minor | Gap 12: the text oracle scores reading order as well as word F1, which is a bag of words and cannot see order; the first measurement separated 18 improvements from 6 regressions in a change F1 called unchanged on 26 of 29 files. Estimates unchanged. |
 | 2026-10-14 | minor | M1: raw-deflate fallback preserves decoding-limit errors in strict and tolerant decoding; synthetic filter and COS stream regressions. Estimates unchanged. |
 | 2026-10-15 | patch | Gap 24: record localization and installers as partial (unusable Chinese, Telugu and Arabic; unsigned Linux packages) |

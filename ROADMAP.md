@@ -173,7 +173,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
-- **2026-10-19 (gap 14, Vietnamese collation):** Comments (sort, author filter, search), Summarize Comments, form "Sort items", Combine and the bookmark filter sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as the same text, through the new `pdfcraft-collate` crate. Headless sessions get Root order (accented Latin letters beside their base letter) with NFC = NFD too; Find and Search & Redact, and scripts other than Latin, keep the old behaviour. Estimates unchanged.
+- **2026-10-19 (gap 14, Vietnamese collation):** Comments (sort, author filter, search), Summarize Comments, form "Sort items", Combine and the bookmark filter sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as the same text, through the new `pdfcraft-collate` crate. The Vietnamese order applies when the interface language is Vietnamese (the bookmark filter matches but does not sort); `vi` is the only tailored order, so every other interface language, headless sessions and documents with another `/Lang` get Root (accented Latin letters beside their base letter, which moves letters such as Czech `č` or Polish `ł` from after `z` to beside the base letter), with NFC = NFD too. Find, Search & Redact and the command palette, and scripts other than Latin, keep the old behaviour (`fold_case`). Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
@@ -555,7 +555,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | Gap 14: user-visible lists sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as equal in Comments, Summarize Comments, form "Sort items", Combine and the bookmark filter; headless sessions get Root order with NFC = NFD; only Find and Search & Redact and scripts other than Latin keep the old behaviour. Estimates unchanged. |
+| 2026-10-19 | minor | Gap 14: user-visible lists sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as equal in Comments, Summarize Comments, form "Sort items", Combine and the bookmark filter; the Vietnamese order applies when the interface language is Vietnamese, every other language and headless sessions get Root order with NFC = NFD; only Find, Search & Redact, the command palette and scripts other than Latin keep the old behaviour. Estimates unchanged. |
 | 2026-10-18 | minor | M5, PR #1971: nested source `/Page` and `/Pages` dictionaries export as null without traversing page content or the page tree. Synthetic saved/reopened three-page regression retains unrelated metadata and aliases. FDF import semantics, copied-graph limits and estimates unchanged. |
 | 2026-10-15 | minor | M5: budget retained FDF entries before cloning; discovery keeps lazy array owners and annotation positions, with alias/cache-eviction stress fixtures. Limits cover the copied graph; source parsing/page discovery retain existing COS/parser limits, with no total source-memory bound. FDF import semantics and estimates unchanged. |
 | 2026-10-15 | minor | M7: the Edit text caret is as tall as the row it is on in a region with several sizes; estimates unchanged. |
