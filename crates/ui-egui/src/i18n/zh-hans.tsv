@@ -2398,3 +2398,6 @@ animation effects	Off	关
 	Make properties default	将属性设为默认
 	Pages selected	选定的页面
 	Page properties	页面属性
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	吸附到图形：开
+	Snap to drawing: off	吸附到图形：关

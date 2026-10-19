@@ -2448,3 +2448,6 @@ animation effects	Off	Desativados
 	Make properties default	Tornar propriedades padrão
 	Pages selected	Páginas selecionadas
 	Page properties	Propriedades da página
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Ajustar ao desenho: ligado
+	Snap to drawing: off	Ajustar ao desenho: desligado

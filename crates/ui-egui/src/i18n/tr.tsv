@@ -2430,3 +2430,6 @@ animation effects	Off	Kapalı
 	Make properties default	Özellikleri varsayılan yap
 	Pages selected	Seçilen sayfalar
 	Page properties	Sayfa özellikleri
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Çizime yapıştır: açık
+	Snap to drawing: off	Çizime yapıştır: kapalı

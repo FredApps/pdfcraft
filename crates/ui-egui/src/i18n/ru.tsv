@@ -2347,3 +2347,6 @@ animation effects	Off	Выкл
 	Make properties default	Сделать свойства стандартными
 	Pages selected	Выделенные страницы
 	Page properties	Свойства страницы
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Привязка к чертежу: вкл.
+	Snap to drawing: off	Привязка к чертежу: выкл.

@@ -2508,3 +2508,6 @@ animation effects	Off	Vypnuto
 	Make properties default	Nastavit vlastnosti jako výchozí
 	Pages selected	Vybrané stránky
 	Page properties	Vlastnosti stránky
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Přichytávání ke kresbě: zapnuto
+	Snap to drawing: off	Přichytávání ke kresbě: vypnuto

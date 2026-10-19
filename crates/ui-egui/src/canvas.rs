@@ -2761,6 +2761,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let allowed = doc.allows_annotation();
     let can_copy = doc.allows_copying();
     let mut copy_selected = false;
+    let mut comment_notice = None;
     let comments_hidden = doc.comments_hidden();
     let form = doc.form.clone();
     let can_fill = doc.allows_form_filling();
@@ -3040,7 +3041,19 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, t.border.gamma_multiply(0.8)), egui::StrokeKind::Outside);
 
             // Comments: tools, selection, moving and resizing come before text selection.
-            let pcx = comments::PageCx { page: i, xf: &xf, info, tool, prefs, allowed, hidden: comments_hidden, redact_mark };
+            // Snap to drawing (M5): the page's paths, for the drawing tools that set points.
+            let snap = match tool {
+                QuickTool::Comment(t) if prefs.snap && t.snaps() => {
+                    let mut notice = None;
+                    let geometry = view.comments.snap_cache.geometry(doc, i, &mut notice);
+                    if notice.is_some() {
+                        view.comments.notice = notice;
+                    }
+                    geometry
+                }
+                _ => None,
+            };
+            let pcx = comments::PageCx { page: i, xf: &xf, info, tool, prefs, allowed, hidden: comments_hidden, redact_mark, snap };
             if let QuickTool::Measure(measure_tool) = tool {
                 crate::measure_ui::page_input(ui, &resp, doc, view, &pcx, measure_tool, units);
             }
@@ -3727,6 +3740,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
             canvas_action = comments::context_menu(ui, view, info, prefs, allowed).or(copy_image);
         });
+        comment_notice = view.comments.notice.take();
         (wanted, visible_now)
     });
     view.single_edges = visible_pages.first().copied().filter(|_| !view.continuous).map(|page| {
@@ -4070,6 +4084,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     if copy_selected {
         app.execute("edit.copy");
+    }
+    if let Some(notice) = comment_notice {
+        app.notify_tr(notice);
     }
     // Read mode hides the tools (#2646).
     if app.mode != crate::Mode::Read {

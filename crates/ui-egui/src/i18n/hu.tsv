@@ -2433,3 +2433,6 @@ animation effects	Off	Ki
 	Make properties default	Tulajdonságok beállítása alapértelmezettként
 	Pages selected	Kijelölt oldalak
 	Page properties	Oldaltulajdonságok
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Igazítás a rajzhoz: be
+	Snap to drawing: off	Igazítás a rajzhoz: ki

@@ -2432,3 +2432,6 @@ animation effects	Off	Өшірулі
 	Make properties default	Қасиеттерді әдепкі ету
 	Pages selected	Таңдалған беттер
 	Page properties	Бет қасиеттері
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Сызбаға бекіту: қосулы
+	Snap to drawing: off	Сызбаға бекіту: өшірулі

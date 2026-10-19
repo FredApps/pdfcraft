@@ -2435,3 +2435,6 @@ animation effects	Off	Aus
 	Make properties default	Eigenschaften als Standard festlegen
 	Pages selected	Ausgewählte Seiten
 	Page properties	Seiteneigenschaften
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	An Zeichnung einrasten: an
+	Snap to drawing: off	An Zeichnung einrasten: aus

@@ -2397,3 +2397,6 @@ animation effects	Off	Изключени
 	Make properties default	Задаване като свойства по подразбиране
 	Pages selected	Избрани страници
 	Page properties	Свойства на страницата
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Прилепване към чертежа: включено
+	Snap to drawing: off	Прилепване към чертежа: изключено

@@ -2440,3 +2440,6 @@ animation effects	Off	Ανενεργά
 	Make properties default	Ορισμός ιδιοτήτων ως προεπιλογή
 	Pages selected	Επιλεγμένες σελίδες
 	Page properties	Ιδιότητες σελίδας
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Προσκόλληση στο σχέδιο: ενεργή
+	Snap to drawing: off	Προσκόλληση στο σχέδιο: ανενεργή

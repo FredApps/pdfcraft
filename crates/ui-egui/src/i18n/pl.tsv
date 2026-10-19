@@ -2410,3 +2410,6 @@ animation effects	Off	Wyłączone
 	Make properties default	Ustaw właściwości jako domyślne
 	Pages selected	Zaznaczone strony
 	Page properties	Właściwości strony
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Przyciąganie do rysunku: wł.
+	Snap to drawing: off	Przyciąganie do rysunku: wył.

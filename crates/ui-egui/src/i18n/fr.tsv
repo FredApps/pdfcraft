@@ -2434,3 +2434,6 @@ animation effects	Off	Désactivés
 	Make properties default	Définir comme propriétés par défaut
 	Pages selected	Pages sélectionnées
 	Page properties	Propriétés de la page
+# Snap to drawing for the drawing tools (M5).
+	Snap to drawing: on	Accrochage au dessin : activé
+	Snap to drawing: off	Accrochage au dessin : désactivé
