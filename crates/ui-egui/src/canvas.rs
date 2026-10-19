@@ -3336,7 +3336,7 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
         app.execute("edit.copy");
     }
     if copy_comments {
-        app.copy_selected_comments(index);
+        app.execute("comment.copy");
     }
     if let Some(at) = paste_comments_at {
         app.paste_comments(index, None, Some(at));

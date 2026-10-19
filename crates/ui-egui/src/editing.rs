@@ -48,11 +48,12 @@ fn select_after_edit(view: &mut crate::DocView, edit: Edit, info: &pdfcraft_rend
             if matches!(a.shape, pdfcraft_engine::Shape::Ink { .. })
                 && quick_tool == crate::QuickTool::Comment(crate::comments::CommentTool::Ink) =>
         {
-            view.comments.selected = None;
+            view.comments.clear_selection();
         }
         Edit::AddAnnotation(a) => {
-            // Select the new comment (appended last among the page's comments).
+            // Select the new comment alone (appended last among the page's comments).
             let newest = info.annotations.iter().filter(|x| x.page == a.page && !x.is_reply()).map(|x| x.index).max();
+            view.comments.clear_selection();
             view.comments.selected = newest.map(|n| (a.page, n));
             view.comments.reveal = true;
             // A new highlight opens its note for typing straight away, as in Acrobat,
@@ -64,14 +65,19 @@ fn select_after_edit(view: &mut crate::DocView, edit: Edit, info: &pdfcraft_rend
                 view.comments.open_editor(a.page, n, String::new());
             }
         }
+        // A group moved together stays selected (its positions don't change), so it
+        // can be moved or copied again; anything else in a batch clears the selection.
+        Edit::Batch { edits, .. } if edits.iter().all(|e| matches!(e, Edit::MoveAnnotation { .. })) => {}
         Edit::DeleteAnnotation { .. } | Edit::Batch { .. } => view.comments.clear_selection(),
-        // The copies are the page's newest comments (appended last): select them all.
-        Edit::PasteComments { xfdf, page, .. } => {
-            let n = pdfcraft_engine::comment_count(&xfdf);
-            let mut new: Vec<(usize, usize)> =
-                info.annotations.iter().filter(|x| x.page == page && x.in_reply_to.is_none()).map(|x| (page, x.index)).collect();
-            let keep = new.len().saturating_sub(n);
-            new.drain(..keep);
+        // The copies the paste added (and nothing that was there before): select them all.
+        Edit::PasteComments { page, .. } => {
+            let before = paste_before.unwrap_or_default();
+            let mut new: Vec<(usize, usize)> = info
+                .annotations
+                .iter()
+                .filter(|x| x.page == page && x.in_reply_to.is_none() && !before.contains(&x.name))
+                .map(|x| (page, x.index))
+                .collect();
             view.comments.clear_selection();
             if !new.is_empty() {
                 view.comments.selected = Some(new.remove(0));
@@ -123,6 +129,13 @@ impl PdfCraftApp {
             (Some(std::sync::Arc::clone(&d.form)), d.info.pages.len(), d.xfa.is_some())
         } else {
             (None, 0, false)
+        };
+        // What a paste adds is what it selects afterwards: the page's comments before it.
+        let paste_before: Option<Vec<Option<String>>> = match &edit {
+            Edit::PasteComments { page, .. } => {
+                self.session.get(id).map(|d| d.info.annotations.iter().filter(|a| a.page == *page).map(|a| a.name.clone()).collect())
+            }
+            _ => None,
         };
         match self.session.apply(id, edit.clone()) {
             Ok(()) => {
