@@ -214,6 +214,14 @@ pub struct DuplicateDraft {
 }
 
 /// Copied pages: their document's name and bytes (as it was when copied) and the pages.
+/// Copied comments: their XFDF (each with its replies), for `Edit::PasteComments`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommentClip {
+    pub xfdf: String,
+    /// How many comments (replies not counted) were copied.
+    pub count: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct PageClip {
     /// The document the pages were copied from: pasting back into it keeps field names.

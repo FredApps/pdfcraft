@@ -7,7 +7,37 @@ use super::*;
 // ── export ──────────────────────────────────────────────────────────────────────────────────
 
 /// Every comment as an XFDF element (one line per comment, replies included).
-fn xfdf_annots(doc: &Document, out: &mut String) {
+/// The annotations of `which` (0-based page, position in the page's `/Annots`) as references,
+/// with every reply to them (and to those replies), so a thread travels whole.
+fn annots_with_replies(doc: &Document, which: &[(usize, usize)]) -> HashSet<ObjRef> {
+    let pages = pdfcraft_model::pages(doc);
+    let annots = |p: &pdfcraft_model::Page| -> Vec<Object> {
+        p.dict.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap_or_default()
+    };
+    let mut set: HashSet<ObjRef> =
+        which.iter().filter_map(|(pi, i)| pages.get(*pi).and_then(|p| annots(p).get(*i).and_then(Object::as_ref))).collect();
+    // Replies point at their parent through /IRT: a pass per reply depth, bounded by the count.
+    let all: Vec<(ObjRef, Option<ObjRef>)> = pages
+        .iter()
+        .flat_map(annots)
+        .filter_map(|a| a.as_ref())
+        .map(|r| (r, doc.get(r).as_dict().and_then(|d| d.get(b"IRT")).and_then(Object::as_ref)))
+        .collect();
+    for _ in 0..all.len() {
+        let before = set.len();
+        for (r, irt) in &all {
+            if irt.is_some_and(|parent| set.contains(&parent)) {
+                set.insert(*r);
+            }
+        }
+        if set.len() == before {
+            break;
+        }
+    }
+    set
+}
+
+fn xfdf_annots(doc: &Document, out: &mut String, only: Option<&HashSet<ObjRef>>) {
     let pages = pdfcraft_model::pages(doc);
     // NM of every annotation, for inreplyto.
     let mut names: HashMap<ObjRef, String> = HashMap::new();
@@ -22,6 +52,11 @@ fn xfdf_annots(doc: &Document, out: &mut String) {
     }
     for (pi, p) in pages.iter().enumerate() {
         for a in p.dict.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap_or_default() {
+            if let Some(only) = only
+                && !a.as_ref().is_some_and(|r| only.contains(&r))
+            {
+                continue;
+            }
             let Some(d) = doc.resolve(&a).as_dict().cloned() else { continue };
             let Some(sub) = d.name(b"Subtype") else { continue };
             let Some((_, tag)) = SUBTYPES.iter().find(|(s, _)| s.as_bytes() == sub) else { continue };
@@ -196,7 +231,7 @@ pub fn export_xfdf(doc: &Document, comments: bool, fields: bool, file: &str) -> 
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">\n");
     if comments {
         out.push_str("<annots>\n");
-        xfdf_annots(doc, &mut out);
+        xfdf_annots(doc, &mut out, None);
         out.push_str("</annots>\n");
     }
     if fields {
@@ -472,7 +507,32 @@ pub(crate) fn add_popup(doc: &mut Document, page: ObjRef, parent: ObjRef, rect: 
     Ok(())
 }
 
+/// Import XFDF comments as copies: every comment lands on `page` (0-based; its own page when
+/// `None`) and, with `fresh` (a prefix unique to this import), under a new name, so nothing in
+/// the document is replaced and pasting the same comments twice gives two copies. Replies keep
+/// their thread among the pasted comments; a reply to a comment that was not copied stands
+/// alone. Field values in the file are ignored.
+pub fn import_comments(
+    doc: &mut Document,
+    text: &str,
+    page: Option<usize>,
+    fresh: Option<&str>,
+    offset: Option<[f64; 2]>,
+) -> Result<Report, DataError> {
+    import_xfdf_with(doc, text, page, fresh, offset.filter(|o| o.iter().all(|v| v.is_finite())))
+}
+
 pub(crate) fn import_xfdf(doc: &mut Document, text: &str) -> Result<Report, DataError> {
+    import_xfdf_with(doc, text, None, None, None)
+}
+
+fn import_xfdf_with(
+    doc: &mut Document,
+    text: &str,
+    target_page: Option<usize>,
+    fresh: Option<&str>,
+    offset: Option<[f64; 2]>,
+) -> Result<Report, DataError> {
     check_form_xml_depth(text)?;
     let xml = parse_form_xml(text).map_err(|e| DataError::Malformed(e.to_string()))?;
     let root = xml.root_element();
@@ -481,28 +541,64 @@ pub(crate) fn import_xfdf(doc: &mut Document, text: &str) -> Result<Report, Data
     }
     let mut report = Report::default();
     let pages: Vec<ObjRef> = pdfcraft_model::pages(doc).iter().map(|p| p.obj).collect();
+    if let Some(p) = target_page
+        && p >= pages.len()
+    {
+        return Err(DataError::Malformed(format!("page {} is not in the document", p + 1)));
+    }
     // Comments: parents first, then replies (whose /IRT needs the parent's reference).
     let mut by_name: HashMap<String, ObjRef> = HashMap::new();
     let mut later: HashMap<ObjRef, String> = HashMap::new();
+    // Fresh names: `name` → the name the copy gets, so replies find their copied parent.
+    let mut renamed: HashMap<String, String> = HashMap::new();
+    if let (Some(prefix), Some(annots)) = (fresh, root.children().find(|c| c.has_tag_name("annots"))) {
+        for (n, node) in annots.children().filter(|c| c.is_element()).enumerate() {
+            if let Some(nm) = node.attribute("name") {
+                renamed.insert(nm.to_string(), format!("{prefix}-{}", n + 1));
+            }
+        }
+    }
     if let Some(annots) = root.children().find(|c| c.has_tag_name("annots")) {
-        for node in annots.children().filter(|c| c.is_element()) {
+        for (n, node) in annots.children().filter(|c| c.is_element()).enumerate() {
             let tag = node.tag_name().name().to_ascii_lowercase();
             let Some((subtype, _)) = SUBTYPES.iter().find(|(_, t)| *t == tag) else { continue };
-            let Some(page) = node.attribute("page").and_then(|p| p.parse::<usize>().ok()).and_then(|p| pages.get(p).copied()) else { continue };
-            let Some(d) = annot_from_xml(node, subtype, page) else { continue };
+            let own_page = node.attribute("page").and_then(|p| p.parse::<usize>().ok());
+            let Some(page) = target_page.or(own_page).and_then(|p| pages.get(p).copied()) else { continue };
+            let Some(mut d) = annot_from_xml(node, subtype, page) else { continue };
+            if let Some(prefix) = fresh {
+                // A copy under a name of its own (one even where the original had none).
+                let name = node.attribute("name").and_then(|nm| renamed.get(nm).cloned()).unwrap_or_else(|| format!("{prefix}-{}", n + 1));
+                d.set(b"NM".to_vec(), PdfString::text(&name));
+            }
+            if let Some([dx, dy]) = offset {
+                translate(&mut d, dx, dy);
+            }
             let r = place(doc, page, d)?;
             // A later same-name record replaces this comment, including its reply relation.
             later.remove(&r);
             if let Some(nm) = node.attribute("name") {
-                by_name.insert(nm.to_string(), r);
+                let nm = renamed.get(nm).cloned().unwrap_or_else(|| nm.to_string());
+                by_name.insert(nm, r);
             }
             if let Some(irt) = node.attribute("inreplyto") {
-                later.insert(r, irt.to_string());
+                match (fresh, renamed.get(irt)) {
+                    // The parent is among the copies: the reply follows it.
+                    (Some(_), Some(parent)) => later.insert(r, parent.clone()),
+                    // A copy's parent was not copied: the reply stands alone rather than
+                    // attaching to a same-named comment the document happens to have.
+                    (Some(_), None) => None,
+                    (None, _) => later.insert(r, irt.to_string()),
+                };
             }
             // A pop-up window.
             if let Some(pop) = node.children().find(|c| c.has_tag_name("popup"))
-                && let Some(rect) = pop.attribute("rect").map(csv).filter(|r| r.len() == 4)
+                && let Some(mut rect) = pop.attribute("rect").map(csv).filter(|r| r.len() == 4)
             {
+                if let Some([dx, dy]) = offset {
+                    for (i, v) in rect.iter_mut().enumerate() {
+                        *v += if i % 2 == 0 { dx } else { dy };
+                    }
+                }
                 add_popup(doc, page, r, &rect, pop.attribute("open") == Some("yes"))?;
             }
             report.comments += 1;
@@ -512,6 +608,10 @@ pub(crate) fn import_xfdf(doc: &mut Document, text: &str) -> Result<Report, Data
         if let Some(parent) = by_name.get(&irt).copied().or_else(|| find_by_name(doc, &irt)) {
             doc.update_dict(r, |d| d.set(b"IRT".to_vec(), Object::Ref(parent)))?;
         }
+    }
+    // Comments placed as copies: the file's field values are not part of the paste.
+    if fresh.is_some() || target_page.is_some() || offset.is_some() {
+        return Ok(report);
     }
     // Fields.
     if let Some(fields) = root.children().find(|c| c.has_tag_name("fields")) {

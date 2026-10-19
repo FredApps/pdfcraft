@@ -2842,3 +2842,17 @@ theme	Appearance	Aparência
 	Rotate the selected pages clockwise	Girar as páginas selecionadas no sentido horário
 	Extract the selected pages…	Extrair as páginas selecionadas…
 	Delete the selected pages	Excluir as páginas selecionadas
+# Comments copied between documents and selected several at once; finishing connected lines from the menu (M14).
+	Copy comment	Copiar comentário
+	Copy comments	Copiar comentários
+	Paste comments	Colar comentários
+	Delete comments	Excluir comentários
+	Move comments	Mover comentários
+	Complete	Concluir
+	Undo last point	Desfazer o último ponto
+	Cancel drawing	Cancelar o desenho
+	Copy comments first	Copie comentários primeiro
+	Click where the copied comments go; Escape lets them go	Clique onde os comentários copiados devem ficar; Esc os solta
+	The copied comments are larger than this page; they were placed as they are	Os comentários copiados são maiores que esta página; foram colocados como estão
+	The clipboard holds no comments	A área de transferência não contém comentários
+	Comments: {n}	Comentários: {n}

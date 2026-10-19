@@ -64,7 +64,21 @@ fn select_after_edit(view: &mut crate::DocView, edit: Edit, info: &pdfcraft_rend
                 view.comments.open_editor(a.page, n, String::new());
             }
         }
-        Edit::DeleteAnnotation { .. } => view.comments.selected = None,
+        Edit::DeleteAnnotation { .. } | Edit::Batch { .. } => view.comments.clear_selection(),
+        // The copies are the page's newest comments (appended last): select them all.
+        Edit::PasteComments { xfdf, page, .. } => {
+            let n = pdfcraft_engine::comment_count(&xfdf);
+            let mut new: Vec<(usize, usize)> =
+                info.annotations.iter().filter(|x| x.page == page && x.in_reply_to.is_none()).map(|x| (page, x.index)).collect();
+            let keep = new.len().saturating_sub(n);
+            new.drain(..keep);
+            view.comments.clear_selection();
+            if !new.is_empty() {
+                view.comments.selected = Some(new.remove(0));
+                view.comments.also = new;
+                view.comments.reveal = true;
+            }
+        }
         _ => {}
     }
 }
@@ -219,7 +233,7 @@ impl PdfCraftApp {
                 if let Some(doc) = self.session.get(id) {
                     self.views[i].document_changed(&doc.info);
                 }
-                self.views[i].comments.selected = None;
+                self.views[i].comments.clear_selection();
                 let label = crate::i18n::edit_label(&label);
                 if undo {
                     self.notify_fmt("Undid {label}", &[("label", &label)]);
