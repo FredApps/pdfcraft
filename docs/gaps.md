@@ -1,6 +1,6 @@
 # Where PdfCraft falls short of Acrobat Pro
 
-> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (gap 14: Vietnamese sort order and NFC = NFD in the user-visible text lists; Find and Search & Redact, other scripts and headless runs remain) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-19 · **Last updated:** 2026-10-19 · **Change:** minor (gap 14, related note: language-aware order and NFC = NFD in the user-visible text lists; Find and Search & Redact and scripts other than Latin remain) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (gap 12: reading order is scored, not just word F1) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (M1: raw-deflate fallback preserves decoding-limit errors; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-13 · **Change:** minor (gap 14: Vietnamese catalog shipped; Hindi/Indonesian/Korean and Arabic RTL remain) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -301,15 +301,16 @@ update the numbers.
   Korean; it ships Arabic in its Middle East edition; it ships none of Hindi or Indonesian).
   Vietnamese ships as a catalog (`vi`, 100% of the current localizable union) but stays `partial`
   like other non-English languages (no translated help; engine/OS details stay English).
-  Vietnamese text also sorts in its own order (CLDR `vi`) and treats NFC and NFD as equal in the
-  Comments panel, Summarize Comments, form "Sort items", Combine and the bookmark filter
-  (`pdfcraft-collate`). Still missing there: Find and Search & Redact keep the plain case-fold
-  (no NFC match; they map hits back to glyph positions), scripts other than Latin are not unified,
-  headless runs and automation sort in Root order (forms honour the document `/Lang`), and the
-  comment summary report's font does not draw every Vietnamese letter.
 - **Evidence:** [localization.md](localization.md) §Arabic; `misc.rtl-ui` planned.
 - **Estimate:** 25–45 h (Arabic RTL 20–35, three catalogs 8–12 plus review). **Doc:**
   [localization-parity.md](localization-parity.md).
+- **Related, not part of this estimate: language-aware order of user text.** Comments (sort,
+  author filter, search), Summarize Comments, form "Sort items", Combine and the bookmark filter
+  sort in the order of the interface language (CLDR `vi` for Vietnamese, Root otherwise) and treat
+  NFC and NFD as equal (`pdfcraft-collate`); headless sessions get Root order with NFC = NFD.
+  Still missing: Find and Search & Redact keep the plain case-fold (no NFC match; they map hits
+  back to glyph positions), scripts other than Latin are not unified, and the comment summary
+  report's font does not draw every Vietnamese letter.
 
 ### 15. Forms: JavaScript object model, actions, submit, XFA depth
 
@@ -389,7 +390,7 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | Gap 14: user-visible lists sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as equal: Comments (sort, author filter, search), Summarize Comments, form "Sort items", Combine, the bookmark filter. Find and Search & Redact, other scripts and headless sessions remain. Estimates unchanged. |
+| 2026-10-19 | minor | Gap 14: user-visible lists sort in Vietnamese order (CLDR `vi`) and treat NFC and NFD as equal: Comments (sort, author filter, search), Summarize Comments, form "Sort items", Combine, the bookmark filter. Headless sessions get Root order with NFC = NFD; only Find and Search & Redact and scripts other than Latin keep the old behaviour. Estimates unchanged. |
 | 2026-10-15 | minor | Gap 12: the text oracle scores reading order as well as word F1, which is a bag of words and cannot see order; the first measurement separated 18 improvements from 6 regressions in a change F1 called unchanged on 26 of 29 files. Estimates unchanged. |
 | 2026-10-14 | minor | M1: raw-deflate fallback preserves decoding-limit errors in strict and tolerant decoding; synthetic filter and COS stream regressions. Estimates unchanged. |
 | 2026-10-15 | patch | Gap 24: record localization and installers as partial (unusable Chinese, Telugu and Arabic; unsigned Linux packages) |
