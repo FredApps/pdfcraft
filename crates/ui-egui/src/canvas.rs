@@ -3041,9 +3041,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, t.border.gamma_multiply(0.8)), egui::StrokeKind::Outside);
 
             // Comments: tools, selection, moving and resizing come before text selection.
-            // Snap to drawing (M5): the page's paths, for the drawing tools that set points.
+            // Snap to drawing (M5): the page's paths, for the drawing tools that set points, on
+            // the page the pointer is over (extracting a plan's paths takes up to a second).
             let snap = match tool {
-                QuickTool::Comment(t) if prefs.snap && t.snaps() => {
+                QuickTool::Comment(t) if prefs.snap && t.snaps() && (resp.hovered() || resp.dragged()) => {
                     let mut notice = None;
                     let geometry = view.comments.snap_cache.geometry(doc, i, &mut notice);
                     if notice.is_some() {
