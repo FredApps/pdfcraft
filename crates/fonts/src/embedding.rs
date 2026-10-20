@@ -127,7 +127,10 @@ fn register_in_acroform(doc: &mut Document, font_ref: pdfcraft_cos::ObjRef) -> R
     let af_ref = match existing {
         Some(Object::Ref(r)) if doc.get(r).as_dict().is_some() => r,
         other => {
-            let d = other.and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+            let mut d = other.and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+            if !d.contains(b"Fields") {
+                d.set(b"Fields".to_vec(), Object::Array(Vec::new()));
+            }
             let r = doc.add(Object::Dict(d));
             doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Ref(r))).map_err(|e| e.to_string())?;
             r
@@ -511,5 +514,39 @@ mod tests {
         let programs = doc.scan_objects().filter(|(_, o)| matches!(o.as_ref(), Object::Stream(s) if s.dict.get(b"PCFullFont").is_some())).count();
         assert_eq!(programs, 1, "one program for both pages");
         assert!(doc.scan_objects().count() > objects, "the second page gets its own resource");
+    }
+
+    /// AcroForm registration in an empty document creates an empty `/Fields` array, and preserves existing fields.
+    #[test]
+    fn acroform_registration_populates_missing_fields_array_and_preserves_existing() {
+        let mut doc = Document::new_empty();
+        let _ = ensure_fallback_font(&mut doc).unwrap();
+        assert!(fallback_font_ref(&doc).is_some());
+        let root = doc.root().unwrap();
+        let cat = doc.get(root).as_dict().unwrap().clone();
+        let af_ref = match cat.get(b"AcroForm").unwrap() {
+            Object::Ref(r) => *r,
+            _ => panic!("AcroForm should be a reference"),
+        };
+        let af_obj = doc.get(af_ref);
+        let af = af_obj.as_dict().unwrap();
+        assert_eq!(af.get(b"Fields"), Some(&Object::Array(Vec::new())));
+
+        let mut doc2 = Document::new_empty();
+        let root2 = doc2.root().unwrap();
+        let dummy_field = doc2.add(Object::Dict(Dict::new()));
+        let mut inline_af = Dict::new();
+        inline_af.set(b"Fields".to_vec(), Object::Array(vec![Object::Ref(dummy_field)]));
+        doc2.update_dict(root2, |c| c.set(b"AcroForm".to_vec(), Object::Dict(inline_af))).unwrap();
+
+        let _ = ensure_fallback_font(&mut doc2).unwrap();
+        let cat2 = doc2.get(root2).as_dict().unwrap().clone();
+        let af_ref2 = match cat2.get(b"AcroForm").unwrap() {
+            Object::Ref(r) => *r,
+            _ => panic!("AcroForm should be a reference"),
+        };
+        let af2_obj = doc2.get(af_ref2);
+        let af2 = af2_obj.as_dict().unwrap();
+        assert_eq!(af2.get(b"Fields"), Some(&Object::Array(vec![Object::Ref(dummy_field)])));
     }
 }
