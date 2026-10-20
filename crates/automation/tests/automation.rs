@@ -4430,6 +4430,7 @@ fn text_box_font_size_through_the_tool() {
     assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Change comment properties");
 }
 
+/// Editing a comment's font family through the headless comment_edit tool updates the /DA resource and appearance.
 #[test]
 fn text_box_font_through_the_tool() {
     let dir = workdir("boxfont");

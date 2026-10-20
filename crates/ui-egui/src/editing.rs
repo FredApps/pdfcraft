@@ -961,6 +961,7 @@ fn content_page(edit: &Edit) -> Option<usize> {
     }
 }
 
+/// The page index associated with a comment edit, if any.
 fn comment_page(edit: &Edit) -> Option<usize> {
     match edit {
         Edit::AddAnnotation(a) => Some(a.page),

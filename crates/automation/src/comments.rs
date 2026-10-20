@@ -604,6 +604,7 @@ impl Automation {
         self.deliver(a, &format!("Summary of comments on {stem}.pdf"), bytes)
     }
 
+    /// Edit a comment's contents, appearance (colour, fill, opacity, font, font size), geometry or position.
     pub(crate) fn comment_edit(&mut self, a: &Args) -> Result<Value> {
         let (page, index) = self.comment_target(a)?;
         let info = self.doc(a)?.info.pages[page].clone();

@@ -704,6 +704,7 @@ pub fn redraw_field(doc: &mut Document, name: &str) -> Result<(), FormError> {
     redraw_widgets(doc, name, None)
 }
 
+/// Regenerate widget appearances for field `name`, optionally limited to a single widget index.
 fn redraw_widgets(doc: &mut Document, name: &str, only: Option<usize>) -> Result<(), FormError> {
     let f = fields(doc).into_iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?;
     let can_fallback = |s: &str| pdfcraft_fonts::first_undrawable(s).is_some() && pdfcraft_fonts::first_undrawable_with_fallback(s).is_none();

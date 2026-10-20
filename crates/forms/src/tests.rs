@@ -439,6 +439,7 @@ fn unavailable_glyph_uses_an_appearance_font_without_changing_the_source_font() 
     assert_eq!(shown, b"Citt\xe0 Sant\x92Angelo \x97 qualit\xe0");
 }
 
+/// AcroForm fields filled with Central European characters use the embedded fallback font (/PCFallback) without question marks or undrawn marks.
 #[test]
 fn polish_characters_in_form_field_use_fallback_font_without_question_marks() {
     let objs: Vec<String> = vec![
@@ -466,6 +467,33 @@ fn polish_characters_in_form_field_use_fallback_font_without_question_marks() {
     let metrics = pdfcraft_fonts::pdf::Metrics::from_dict(&doc, font);
     let shown = lines.concat();
     assert_eq!(metrics.decode(&shown), value);
+}
+
+/// AcroForm fields only embed PCFallback when the fallback font has full coverage of the required characters.
+#[test]
+fn acroform_field_fallback_requires_full_coverage() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>".into(),
+        "<< /Fields [6 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (miasto) /Rect [50 700 450 730] /P 3 0 R >>".into(),
+    ];
+    let mut doc = document(&objs);
+    // CJK has no coverage in Inter fallback font: PCFallback must NOT be embedded in /DR
+    set_value(&mut doc, "miasto", &FieldValue::Text("日本語".into())).unwrap();
+    let af = acroform(&doc).unwrap();
+    let dr = af.get(b"DR").and_then(|o| o.as_dict()).unwrap();
+    let fonts = dr.get(b"Font").and_then(|o| o.as_dict()).unwrap();
+    assert!(fonts.get(b"PCFallback").is_none(), "PCFallback should not be embedded for CJK text");
+
+    // Polish text has full coverage in Inter: PCFallback must be embedded in /DR
+    set_value(&mut doc, "miasto", &FieldValue::Text("Gdańsk".into())).unwrap();
+    let af = acroform(&doc).unwrap();
+    let dr = af.get(b"DR").and_then(|o| o.as_dict()).unwrap();
+    let fonts = dr.get(b"Font").and_then(|o| o.as_dict()).unwrap();
+    assert!(fonts.get(b"PCFallback").is_some(), "PCFallback should be embedded for Polish text");
 }
 
 #[test]

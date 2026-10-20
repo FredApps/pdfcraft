@@ -245,6 +245,7 @@ fn uses_scripts(edit: &Edit) -> bool {
     }
 }
 
+/// The inspection scope an edit dirties.
 fn scope_of(edit: &Edit) -> Scope {
     match edit {
         Edit::SetInfo { .. } => Scope::Metadata,

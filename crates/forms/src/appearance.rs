@@ -189,6 +189,7 @@ impl FontText {
         }
     }
 
+    /// The text width in points for string `s` in this font at size `size`.
     fn width(&self, s: &str, size: f64) -> f64 {
         match self {
             Self::WinAnsi => helvetica_width(s, size),

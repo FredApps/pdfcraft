@@ -1572,6 +1572,7 @@ fn text_box_properties_change_the_font_size() {
     assert_eq!(doc.can_undo(), Some("Change comment properties"));
 }
 
+/// Changing font in the comment properties dialog updates the appearance, warns on unsupported characters, and undoes cleanly.
 #[test]
 fn text_box_properties_change_the_font() {
     use pdfcraft_engine::{AnnotFont, Edit, NewAnnotation, Shape};

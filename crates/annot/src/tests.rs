@@ -519,6 +519,7 @@ fn fill_and_sign_items_are_drawn() {
     assert!(set_style(&mut doc, 1, 0, Some([0.0; 3]), None, None, None, &meta("")).is_err());
 }
 
+/// Central European characters in typewriter and text box comments use the fallback font (/PCFallback) without question marks or undrawn marks.
 #[test]
 fn polish_characters_in_typewriter_and_text_box_use_fallback_font_without_question_marks() {
     let mut doc = fixture();
@@ -579,6 +580,35 @@ fn polish_characters_in_typewriter_and_text_box_use_fallback_font_without_questi
     assert!(!ap.contains('?'));
 }
 
+/// Comments containing characters not covered by the fallback font (such as CJK) preserve Helvetica rather than switching to Inter.
+#[test]
+fn cjk_text_in_typewriter_and_text_box_preserves_helvetica() {
+    let mut doc = fixture();
+    let typed = Shape::Typewriter { rect: [100.0, 700.0, 300.0, 720.0], font_size: 11.0 };
+    let t = add_annotation(
+        &mut doc,
+        &NewAnnotation { page: 1, style: Style::default_for(&typed), shape: typed, contents: "日本語テキスト".into(), author: "Test".into() },
+        &meta("cjk"),
+    )
+    .unwrap();
+    assert_eq!(props(&doc, 1, t).unwrap().font, Some(AnnotFont::Helvetica));
+    let tb = add_annotation(
+        &mut doc,
+        &NewAnnotation {
+            page: 1,
+            style: Style::default_for(&Shape::TextBox { rect: [100.0, 600.0, 300.0, 640.0], font_size: 12.0 }),
+            shape: Shape::TextBox { rect: [100.0, 600.0, 300.0, 640.0], font_size: 12.0 },
+            contents: "Hello".into(),
+            author: "Test".into(),
+        },
+        &meta("tb"),
+    )
+    .unwrap();
+    set_contents(&mut doc, 1, tb, "中文文本", &meta("cjk_edit")).unwrap();
+    assert_eq!(props(&doc, 1, tb).unwrap().font, Some(AnnotFont::Helvetica));
+}
+
+/// Changing a text box comment's font updates /DA, refits the bounding box, and redraws the appearance stream.
 #[test]
 fn text_box_font_changes_the_da_and_appearance() {
     let mut doc = fixture();

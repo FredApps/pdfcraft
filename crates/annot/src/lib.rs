@@ -509,6 +509,7 @@ pub type OverlayFont = AnnotFont;
 impl AnnotFont {
     pub const ALL: [AnnotFont; 4] = [AnnotFont::Helvetica, AnnotFont::Times, AnnotFont::Courier, AnnotFont::Inter];
 
+    /// The human-readable name of the font.
     pub fn name(self) -> &'static str {
         match self {
             AnnotFont::Helvetica => "Helvetica",
@@ -538,6 +539,7 @@ impl AnnotFont {
         }
     }
 
+    /// Resolve an [`AnnotFont`] from a `/DA` font resource name or base font.
     pub fn from_resource(n: &str) -> AnnotFont {
         match n {
             "TiRo" | "Times-Roman" | "TimesRoman" | "Times" => AnnotFont::Times,
@@ -547,6 +549,7 @@ impl AnnotFont {
         }
     }
 
+    /// Resolve an [`AnnotFont`] from a case-insensitive user or tool font name.
     pub fn from_name(n: &str) -> Option<AnnotFont> {
         match n.trim().to_ascii_lowercase().as_str() {
             "helvetica" | "helv" => Some(AnnotFont::Helvetica),
@@ -557,6 +560,7 @@ impl AnnotFont {
         }
     }
 
+    /// Calculate text width in points for string `s` in this font at size `size`.
     pub fn text_width(self, s: &str, size: f64) -> f64 {
         match self {
             AnnotFont::Helvetica => pdfcraft_fonts::helvetica_width(s, size),

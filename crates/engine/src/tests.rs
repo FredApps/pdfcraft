@@ -1853,6 +1853,7 @@ fn form_edits_refresh_field_values_without_a_full_inspection() {
     assert_eq!(values(&d.info.fields), [("name".to_string(), Some("Ada".to_string())), ("ok".to_string(), Some("Yes".to_string()))]);
 }
 
+/// AcroForm fields and Fill & Sign typewriter annotations with Central European characters render without question marks in the engine.
 #[test]
 fn polish_typewriter_and_form_field_work_without_question_marks() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
