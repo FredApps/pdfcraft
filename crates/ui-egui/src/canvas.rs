@@ -3005,6 +3005,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         _ => None,
     };
     let mut open_props: Option<(usize, usize)> = None;
+    let mut recolour: Option<pdfcraft_engine::Rgb> = None;
     // The table being set up in its window, shown on its own document's page.
     let table_preview = app.field_table_draft.as_mut().filter(|d| d.doc == view.id).and_then(|d| Some(d.preview(info.pages.get(d.page)?, &form)));
     let can_modify = doc.allows_modification();
@@ -3174,6 +3175,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             app.comments_panel_closed = false;
         }
         Some(comments::CanvasAction::Properties(p, i)) => open_props = Some((p, i)),
+        Some(comments::CanvasAction::Colour(c)) => recolour = Some(c),
         Some(comments::CanvasAction::CopyImage(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::Copy(p, i)),
         Some(comments::CanvasAction::CopyImageFile(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::CopyFile(p, i)),
         None => {}
@@ -3248,6 +3250,9 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
     }
     if let Some((p, i)) = open_props {
         app.open_comment_props(p, i);
+    }
+    if let Some(c) = recolour {
+        app.colour_selected_comments(c);
     }
     if let Some((p, i)) = app.views[index].comments.default_request.take() {
         app.make_comment_default(p, i);
