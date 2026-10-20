@@ -976,7 +976,7 @@ impl Renderer {
         // stays for 1:1 and magnified images, where it is both faster and sharper — and for
         // Type 3 glyph images, whose crisp palette pixels issue #624 protects.
         let requested_resize = x_scale < 1.0 || y_scale < 1.0;
-        let smooth = interpolate || (requested_resize && !self.in_type3_glyph);
+        let mut smooth = interpolate || (requested_resize && !self.in_type3_glyph);
         let mut quality = if smooth {
             ImageQuality::Medium
         } else {
@@ -996,21 +996,54 @@ impl Renderer {
         ) {
             Some(target) => target,
             None => {
-                if image_byte_len(source_width, source_height, 4, MAX_IMAGE_PIXELS).is_none() {
-                    log::warn!(
-                        "Image resampling exceeded its buffer limit and the original resolution cannot fit the backend; image skipped"
-                    );
-                    return;
+                // PdfCraft patch: a smooth plan can be refused (a source side over
+                // MAX_RESAMPLING_SOURCE_SIDE, for example) while a nearest plan still fits.
+                // Retry with nearest sizing before falling back to the original resolution, so
+                // the nearest-fallback contract in `resize_image_data` is not bypassed.
+                let nearest_target = if smooth {
+                    image_resampling_size(
+                        source_width,
+                        source_height,
+                        channels,
+                        data_len,
+                        x_scale,
+                        y_scale,
+                        MAX_IMAGE_PIXELS,
+                        false,
+                    )
+                } else {
+                    None
+                };
+                match nearest_target {
+                    Some(target) => {
+                        smooth = false;
+                        quality = ImageQuality::Low;
+                        log::warn!(
+                            "Smooth image resampling was refused; falling back to nearest-neighbour"
+                        );
+                        target
+                    }
+                    None => {
+                        if image_byte_len(source_width, source_height, 4, MAX_IMAGE_PIXELS)
+                            .is_none()
+                        {
+                            log::warn!(
+                                "Image resampling exceeded its buffer limit and the original resolution cannot fit the backend; image skipped"
+                            );
+                            return;
+                        }
+                        log::warn!(
+                            "Image resampling exceeded its buffer limit; retaining the original resolution"
+                        );
+                        (source_width, source_height)
+                    }
                 }
-                log::warn!(
-                    "Image resampling exceeded its buffer limit; retaining the original resolution"
-                );
-                (source_width, source_height)
             }
         };
         // PdfCraft patch (#624): High is bicubic and would blend the nearest pre-resize of an image
-        // that did not request interpolation, so only interpolated glyph images are promoted.
-        if requested_resize && self.in_type3_glyph && interpolate {
+        // that did not request interpolation, so only interpolated glyph images are promoted —
+        // and not after a refused smooth plan fell back to nearest.
+        if requested_resize && self.in_type3_glyph && smooth {
             quality = ImageQuality::High;
         }
         // PdfCraft patch: an axis-aligned, interpolated image that is shrunk lands on whole device
