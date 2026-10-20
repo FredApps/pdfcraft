@@ -723,19 +723,77 @@ impl Renderer {
         new_width: u32,
         new_height: u32,
         pixel_format: ImagePixelFormat,
-        interpolate: bool,
+        smooth: bool,
+        explicit_interpolate: bool,
     ) -> (Vec<u8>, u32, u32) {
-        // PdfCraft patch (#624): `/Interpolate` governs the pre-minification pass too. Using
-        // Catmull-Rom here for an image that did not request interpolation blends hard edges
-        // before ImageQuality::Low gets a chance to sample it. Keep the pre-resize (and its
-        // bounded memory/performance behaviour), but use nearest-neighbour when interpolation
-        // is disabled. PDF's default for `/Interpolate` is false.
+        // PdfCraft patch (#624, revised): the caller passes `smooth` — true for `/Interpolate`
+        // images and for every minified image, since nearest-neighbour minification makes
+        // scanned text illegible. Magnification without `/Interpolate` still resizes nearest.
+        // A smooth plan can still be refused (sources wider than the resampling side limit, for
+        // example); an image that was only smoothed because it was minified then falls back to
+        // the nearest resize, which has no such limit, rather than to its full-resolution data.
         let nearest = Scaler::new(ResamplingFunction::Nearest);
-        let scaler = if interpolate { &self.scaler } else { &nearest };
-        let resized = match pixel_format {
+        let scaler = if smooth { &self.scaler } else { &nearest };
+        // The input is owned, so a possible nearest fallback keeps its own copy of it.
+        let (first, fallback) = if smooth && !explicit_interpolate {
+            (data.clone(), Some(data))
+        } else {
+            (data, None)
+        };
+        let mut resized = Self::resize_format(
+            self,
+            pixel_format,
+            scaler,
+            smooth,
+            first,
+            src_width,
+            src_height,
+            new_width,
+            new_height,
+        );
+        if resized.is_err() {
+            if let Some(data) = fallback {
+                log::warn!("Smooth image resampling was refused; falling back to nearest-neighbour");
+                resized = Self::resize_format(
+                    self,
+                    pixel_format,
+                    &nearest,
+                    false,
+                    data,
+                    src_width,
+                    src_height,
+                    new_width,
+                    new_height,
+                );
+            }
+        }
+        match resized {
+            Ok(out) => (out, new_width, new_height),
+            Err(original) => {
+                log::warn!(
+                    "Image resampling failed or exceeded its buffer limit; falling back to source data"
+                );
+                (original, src_width, src_height)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn resize_format(
+        &self,
+        pixel_format: ImagePixelFormat,
+        scaler: &Scaler,
+        smooth: bool,
+        data: Vec<u8>,
+        src_width: u32,
+        src_height: u32,
+        new_width: u32,
+        new_height: u32,
+    ) -> Result<Vec<u8>, Vec<u8>> {
+        match pixel_format {
             ImagePixelFormat::Luma => self.resize_image_data_impl::<1>(
                 scaler,
-                interpolate,
+                smooth,
                 data,
                 src_width,
                 src_height,
@@ -747,7 +805,7 @@ impl Renderer {
             ),
             ImagePixelFormat::Rgb => self.resize_image_data_impl::<3>(
                 scaler,
-                interpolate,
+                smooth,
                 data,
                 src_width,
                 src_height,
@@ -759,7 +817,7 @@ impl Renderer {
             ),
             ImagePixelFormat::Rgba => self.resize_image_data_impl::<4>(
                 scaler,
-                interpolate,
+                smooth,
                 data,
                 src_width,
                 src_height,
@@ -769,15 +827,6 @@ impl Renderer {
                     scaler.plan_rgba_resampling(source_size, target_size, true)
                 },
             ),
-        };
-        match resized {
-            Ok(out) => (out, new_width, new_height),
-            Err(original) => {
-                log::warn!(
-                    "Image resampling failed or exceeded its buffer limit; falling back to source data"
-                );
-                (original, src_width, src_height)
-            }
         }
     }
 
@@ -923,14 +972,21 @@ impl Renderer {
                 return;
             }
         }
-        let mut quality = if interpolate {
+        // PdfCraft patch: a minified image is filtered whatever its `/Interpolate`, like the
+        // mismatched-mask path above. Nearest-neighbour minification of a 300-dpi scan at 100 %
+        // zoom drops whole pixel rows and columns, which makes scanned text jagged and
+        // illegible; Chrome and Acrobat smooth minification regardless of the flag. Nearest
+        // stays for 1:1 and magnified images, where it is both faster and sharper — and for
+        // Type 3 glyph images, whose crisp palette pixels issue #624 protects.
+        let requested_resize = x_scale < 1.0 || y_scale < 1.0;
+        let smooth = interpolate || (requested_resize && !self.in_type3_glyph);
+        let mut quality = if smooth {
             ImageQuality::Medium
         } else {
             ImageQuality::Low
         };
         let has_alpha = alpha_data.is_some();
         let mut may_have_transparency = has_alpha || self.force_images_may_have_transparency();
-        let requested_resize = x_scale < 1.0 || y_scale < 1.0;
         let (new_width, new_height) = match image_resampling_size(
             source_width,
             source_height,
@@ -964,7 +1020,7 @@ impl Renderer {
         // pixels. It is shrunk once to exactly its snapped device rectangle and drawn 1:1 at the
         // snapped corner. Otherwise the shrunk raster (rounded up to a whole size) is sampled a
         // second time at a fractional scale and offset, which blurs scans and photos.
-        let snapped = if interpolate
+        let snapped = if smooth
             && requested_resize
             && !self.in_type3_glyph
             && (new_width, new_height) != (source_width, source_height)
@@ -980,7 +1036,7 @@ impl Renderer {
         // nearest-sampled straight into premultiplied target RGBA. That skips the full-resolution
         // RGBA copy below and the premultiply pass after it.
         let direct = match &alpha_data {
-            Some(alpha) if needs_resize && !interpolate => nearest_premultiplied_rgba(
+            Some(alpha) if needs_resize && !smooth => nearest_premultiplied_rgba(
                 &image_data,
                 &alpha.data,
                 (source_width, source_height),
@@ -1039,6 +1095,7 @@ impl Renderer {
                 new_width,
                 new_height,
                 format,
+                smooth,
                 interpolate,
             )
         } else {
