@@ -536,6 +536,7 @@ fn polish_characters_in_typewriter_and_text_box_use_fallback_font_without_questi
     assert_eq!(text(&all[t], b"Contents"), value);
     assert_eq!(pdfcraft_fonts::undrawn_mark(&all[t]), None, "no undrawn marks on Polish text");
     assert_eq!(props(&doc, 1, t).unwrap().font, Some(AnnotFont::Inter));
+    assert!(pdfcraft_fonts::embedding::fallback_font_ref(&doc).is_some(), "fallback font registered in AcroForm /DR");
     let content = ap_content(&doc, &all[t]);
     assert!(content.contains("/PCFallback 11 Tf"), "uses embedded fallback font, got: {content}");
     assert!(!content.contains('?'), "no question marks in content stream");

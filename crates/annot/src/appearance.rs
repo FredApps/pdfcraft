@@ -754,14 +754,19 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
             let q = d.int(b"Q").unwrap_or(0);
             let fallback_info = if annot_font == AnnotFont::Inter {
                 doc.and_then(|doc| {
-                    for (r, obj) in doc.scan_objects() {
-                        if let Object::Dict(fd) = obj.as_ref()
-                            && fd.get(b"PCFallback") == Some(&Object::Bool(true))
-                        {
-                            return Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)));
-                        }
-                    }
-                    None
+                    let r = pdfcraft_fonts::embedding::fallback_font_ref(doc).or_else(|| {
+                        doc.scan_objects().find_map(|(r, obj)| {
+                            if let Object::Dict(fd) = obj.as_ref()
+                                && fd.get(b"PCFallback") == Some(&Object::Bool(true))
+                            {
+                                return Some(r);
+                            }
+                            None
+                        })
+                    })?;
+                    let fd = doc.get(r);
+                    let fd = fd.as_dict()?;
+                    Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)))
                 })
             } else {
                 None

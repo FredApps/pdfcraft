@@ -103,26 +103,101 @@ fn stream(doc: &mut Document, bytes: Vec<u8>) -> Object {
 /// Resource name used for the Unicode fallback font.
 pub const FALLBACK_FONT_NAME: &str = "PCFallback";
 
-/// Ensure the document has the Unicode fallback font (Inter Regular) embedded as a Type 0 CIDFont.
-/// Reuses the existing Type 0 font if already embedded, otherwise embeds it.
+/// The [`ObjRef`] of the embedded fallback font from AcroForm `/DR /Font /PCFallback`, if present.
+pub fn fallback_font_ref(doc: &Document) -> Option<pdfcraft_cos::ObjRef> {
+    let root = doc.root()?;
+    let cat = doc.get(root);
+    let cat = cat.as_dict()?;
+    let af = cat.get(b"AcroForm")?;
+    let af = doc.resolve(af);
+    let af = af.as_dict()?;
+    let dr = af.get(b"DR")?;
+    let dr = doc.resolve(dr);
+    let dr = dr.as_dict()?;
+    let fonts = dr.get(b"Font")?;
+    let fonts = doc.resolve(fonts);
+    let fonts = fonts.as_dict()?;
+    fonts.get(FALLBACK_FONT_NAME.as_bytes()).and_then(Object::as_ref)
+}
+
+/// Register the embedded fallback font into the document's AcroForm `/DR /Font /PCFallback`.
+fn register_in_acroform(doc: &mut Document, font_ref: pdfcraft_cos::ObjRef) -> Result<(), String> {
+    let Some(root) = doc.root() else { return Ok(()) };
+    let existing = doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").cloned());
+    let af_ref = match existing {
+        Some(Object::Ref(r)) if doc.get(r).as_dict().is_some() => r,
+        other => {
+            let d = other.and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+            let r = doc.add(Object::Dict(d));
+            doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Ref(r))).map_err(|e| e.to_string())?;
+            r
+        }
+    };
+    let af = doc.get(af_ref).as_dict().cloned().unwrap_or_default();
+    if let Some(Object::Ref(dr_ref)) = af.get(b"DR").cloned() {
+        if let Some(Object::Ref(font_dict_ref)) = doc.get(dr_ref).as_dict().and_then(|d| d.get(b"Font")).cloned() {
+            doc.update_dict(font_dict_ref, |f| {
+                if f.get(FALLBACK_FONT_NAME.as_bytes()).is_none() {
+                    f.set(FALLBACK_FONT_NAME.as_bytes().to_vec(), Object::Ref(font_ref));
+                }
+            })
+            .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        let mut dr = doc.get(dr_ref).as_dict().cloned().unwrap_or_default();
+        let mut fonts = dr.get(b"Font").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+        if fonts.get(FALLBACK_FONT_NAME.as_bytes()).is_none() {
+            fonts.set(FALLBACK_FONT_NAME.as_bytes().to_vec(), Object::Ref(font_ref));
+            dr.set(b"Font".to_vec(), Object::Dict(fonts));
+            doc.set(dr_ref, Object::Dict(dr));
+        }
+        return Ok(());
+    }
+    let mut af = af;
+    let mut dr = af.get(b"DR").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    let mut fonts = dr.get(b"Font").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    if fonts.get(FALLBACK_FONT_NAME.as_bytes()).is_none() {
+        fonts.set(FALLBACK_FONT_NAME.as_bytes().to_vec(), Object::Ref(font_ref));
+        dr.set(b"Font".to_vec(), Object::Dict(fonts));
+        af.set(b"DR".to_vec(), Object::Dict(dr));
+        doc.set(af_ref, Object::Dict(af));
+    }
+    Ok(())
+}
+
+/// Ensure the document has the Unicode fallback font (Inter Regular) embedded as a Type 0 CIDFont
+/// and registered in AcroForm `/DR /Font /PCFallback`.
+/// Reuses the existing Type 0 font if already embedded and registered, otherwise embeds and registers it.
 pub fn ensure_fallback_font(doc: &mut Document) -> Result<pdfcraft_cos::ObjRef, String> {
-    for (r, obj) in doc.scan_objects() {
+    if let Some(r) = fallback_font_ref(doc) {
+        return Ok(r);
+    }
+    let existing = doc.scan_objects().find_map(|(r, obj)| {
         if let Object::Dict(d) = obj.as_ref()
             && d.get(b"PCFallback") == Some(&Object::Bool(true))
         {
-            return Ok(r);
+            Some(r)
+        } else {
+            None
         }
-    }
-    let mut fonts = Dict::new();
-    let name = embed(doc, &mut fonts, crate::script::INTER_REGULAR, "Inter")?;
-    let font_ref = match fonts.get(name.as_bytes()) {
-        Some(Object::Ref(r)) => *r,
-        _ => return Err("embedded font object reference missing".into()),
+    });
+    let font_ref = match existing {
+        Some(r) => r,
+        None => {
+            let mut fonts = Dict::new();
+            let name = embed(doc, &mut fonts, crate::script::INTER_REGULAR, "Inter")?;
+            let r = match fonts.get(name.as_bytes()) {
+                Some(Object::Ref(r)) => *r,
+                _ => return Err("embedded font object reference missing".into()),
+            };
+            doc.update_dict(r, |d| {
+                d.set(b"PCFallback".to_vec(), Object::Bool(true));
+            })
+            .map_err(|e| e.to_string())?;
+            r
+        }
     };
-    doc.update_dict(font_ref, |d| {
-        d.set(b"PCFallback".to_vec(), Object::Bool(true));
-    })
-    .map_err(|e| e.to_string())?;
+    register_in_acroform(doc, font_ref)?;
     Ok(font_ref)
 }
 

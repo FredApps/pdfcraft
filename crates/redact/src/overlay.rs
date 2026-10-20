@@ -75,7 +75,7 @@ pub(super) fn content(marks: &[&Mark], remaining: &mut usize) -> Result<Vec<u8>,
         }
         // Keep upstream's standard-14 metrics when preparing the bounded appearance.
         let (res, face) = match look.font {
-            pdfcraft_annot::OverlayFont::Helvetica | pdfcraft_annot::OverlayFont::Inter => ("PCHelv", pdfcraft_fonts::Std14::Helvetica),
+            pdfcraft_annot::OverlayFont::Helvetica => ("PCHelv", pdfcraft_fonts::Std14::Helvetica),
             pdfcraft_annot::OverlayFont::Times => ("PCTimes", pdfcraft_fonts::Std14::TimesRoman),
             pdfcraft_annot::OverlayFont::Courier => ("PCCour", pdfcraft_fonts::Std14::Courier),
         };

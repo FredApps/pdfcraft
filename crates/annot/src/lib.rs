@@ -494,7 +494,7 @@ impl Shape {
     }
 }
 
-/// The standard fonts of text boxes, typewriter text and redaction overlay text.
+/// The standard fonts of text boxes, typewriter text and callouts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AnnotFont {
     #[default]
@@ -503,8 +503,6 @@ pub enum AnnotFont {
     Courier,
     Inter,
 }
-
-pub type OverlayFont = AnnotFont;
 
 impl AnnotFont {
     pub const ALL: [AnnotFont; 4] = [AnnotFont::Helvetica, AnnotFont::Times, AnnotFont::Courier, AnnotFont::Inter];
@@ -567,6 +565,55 @@ impl AnnotFont {
             AnnotFont::Times => pdfcraft_fonts::Std14::TimesRoman.text_width(s, size),
             AnnotFont::Courier => pdfcraft_fonts::Std14::Courier.text_width(s, size),
             AnnotFont::Inter => pdfcraft_fonts::inter_width(s, size),
+        }
+    }
+}
+
+/// The standard fonts of redaction overlay text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OverlayFont {
+    #[default]
+    Helvetica,
+    Times,
+    Courier,
+}
+
+impl OverlayFont {
+    pub const ALL: [OverlayFont; 3] = [OverlayFont::Helvetica, OverlayFont::Times, OverlayFont::Courier];
+
+    /// The human-readable name of the font.
+    pub fn name(self) -> &'static str {
+        match self {
+            OverlayFont::Helvetica => "Helvetica",
+            OverlayFont::Times => "Times Roman",
+            OverlayFont::Courier => "Courier",
+        }
+    }
+
+    /// The `/DA` font resource name (Acrobat's form font names).
+    pub fn resource(self) -> &'static str {
+        match self {
+            OverlayFont::Helvetica => "Helv",
+            OverlayFont::Times => "TiRo",
+            OverlayFont::Courier => "Cour",
+        }
+    }
+
+    /// The PDF BaseFont name.
+    pub fn base_font(self) -> &'static str {
+        match self {
+            OverlayFont::Helvetica => "Helvetica",
+            OverlayFont::Times => "Times-Roman",
+            OverlayFont::Courier => "Courier",
+        }
+    }
+
+    /// Resolve an [`OverlayFont`] from a `/DA` font resource name or base font.
+    pub fn from_resource(n: &str) -> OverlayFont {
+        match n {
+            "TiRo" | "Times-Roman" | "TimesRoman" | "Times" => OverlayFont::Times,
+            "Cour" | "Courier" => OverlayFont::Courier,
+            _ => OverlayFont::Helvetica,
         }
     }
 }
@@ -1242,8 +1289,8 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
                 .contents
                 .chars()
                 .any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r') && pdfcraft_fonts::fallback_has_char(c))
+                && pdfcraft_fonts::embedding::ensure_fallback_font(doc).is_ok()
             {
-                let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
                 AnnotFont::Inter
             } else {
                 AnnotFont::Helvetica
@@ -1371,7 +1418,7 @@ fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
     let d = annot_dict(doc, r);
     let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
     if d.name(b"Subtype") == Some(b"FreeText") && appearance::parse_da(&d).2 == AnnotFont::Inter {
-        let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
+        pdfcraft_fonts::embedding::ensure_fallback_font(doc).map_err(AnnotError::Invalid)?;
     }
     let Some(stream) = build_appearance(doc, &d) else { return Err(AnnotError::Unsupported(subtype)) };
     apply_appearance(doc, r, &d, stream)
@@ -1609,17 +1656,18 @@ pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, m
     if free_text {
         let (col, size, font) = appearance::parse_da(&annot_dict(doc, r));
         if font == AnnotFont::Helvetica && needs_fallback {
-            let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
-            doc.update_dict(r, |d| {
-                d.set(
-                    b"DA".to_vec(),
-                    PdfString::literal(
-                        format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), AnnotFont::Inter.resource(), n(size)).into_bytes(),
-                    ),
-                );
-            })?;
+            if pdfcraft_fonts::embedding::ensure_fallback_font(doc).is_ok() {
+                doc.update_dict(r, |d| {
+                    d.set(
+                        b"DA".to_vec(),
+                        PdfString::literal(
+                            format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), AnnotFont::Inter.resource(), n(size)).into_bytes(),
+                        ),
+                    );
+                })?;
+            }
         } else if font == AnnotFont::Inter {
-            let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
+            pdfcraft_fonts::embedding::ensure_fallback_font(doc).map_err(AnnotError::Invalid)?;
         }
     }
     doc.update_dict(r, |d| {
@@ -1664,13 +1712,19 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
     };
     let (x0, top) = (tb[0].min(tb[2]), tb[1].max(tb[3]));
     let fallback_metrics = if font == AnnotFont::Inter {
-        doc.scan_objects().find_map(|(_, obj)| {
-            if let Object::Dict(fd) = obj.as_ref()
-                && fd.get(b"PCFallback") == Some(&Object::Bool(true))
-            {
-                return Some(pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd));
-            }
-            None
+        let r = pdfcraft_fonts::embedding::fallback_font_ref(doc).or_else(|| {
+            doc.scan_objects().find_map(|(r, obj)| {
+                if let Object::Dict(fd) = obj.as_ref()
+                    && fd.get(b"PCFallback") == Some(&Object::Bool(true))
+                {
+                    return Some(r);
+                }
+                None
+            })
+        });
+        r.and_then(|r| {
+            let fd = doc.get(r);
+            Some(pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd.as_dict()?))
         })
     } else {
         None
@@ -2109,7 +2163,7 @@ pub fn set_font(doc: &mut Document, page: usize, index: usize, font: AnnotFont, 
     refuse_foreign_text(doc, &d)?;
     let before = d;
     if font == AnnotFont::Inter {
-        let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
+        pdfcraft_fonts::embedding::ensure_fallback_font(doc).map_err(AnnotError::Invalid)?;
     }
     doc.update_dict(r, |d| {
         let (col, size, _) = appearance::parse_da(d);
