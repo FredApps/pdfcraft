@@ -520,6 +520,26 @@ fn fill_and_sign_items_are_drawn() {
 }
 
 #[test]
+fn polish_characters_in_typewriter_and_text_box_use_fallback_font_without_question_marks() {
+    let mut doc = fixture();
+    let value = "Płock, Gdańsk, Kraków i Poznań: 123 zł";
+    let typed = Shape::Typewriter { rect: [100.0, 700.0, 300.0, 720.0], font_size: 11.0 };
+    let t = add_annotation(
+        &mut doc,
+        &NewAnnotation { page: 1, style: Style::default_for(&typed), shape: typed, contents: value.into(), author: "Marek".into() },
+        &meta("pl"),
+    )
+    .unwrap();
+    let doc = reopen(&doc);
+    let all = list(&doc, 1);
+    assert_eq!(text(&all[t], b"Contents"), value);
+    assert_eq!(pdfcraft_fonts::undrawn_mark(&all[t]), None, "no undrawn marks on Polish text");
+    let content = ap_content(&doc, &all[t]);
+    assert!(content.contains("/PCFallback 11 Tf"), "uses embedded fallback font, got: {content}");
+    assert!(!content.contains('?'), "no question marks in content stream");
+}
+
+#[test]
 fn author_subject_and_note_icon_change() {
     let mut doc = fixture();
     let n = add_annotation(&mut doc, &new(0, Shape::Note { at: [10.0, 100.0], icon: NoteIcon::Comment }), &meta("n")).unwrap();

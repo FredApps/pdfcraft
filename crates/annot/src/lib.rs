@@ -1321,6 +1321,10 @@ fn redraw_or_restore(doc: &mut Document, r: ObjRef, before: Dict) -> Result<(), 
 fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
     let d = annot_dict(doc, r);
     let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
+    let text = d.get(b"Contents").and_then(Object::as_string).map(PdfString::to_text).unwrap_or_default();
+    if d.name(b"Subtype") == Some(b"FreeText") && text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r')) {
+        let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
+    }
     let Some(stream) = build_appearance(doc, &d) else { return Err(AnnotError::Unsupported(subtype)) };
     apply_appearance(doc, r, &d, stream)
 }
@@ -1328,7 +1332,7 @@ fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
 /// Draw the appearance for an annotation dictionary: the expensive half of [`set_appearance`].
 /// Pure from the dictionary and the objects it points at, so [`AppearanceCache`] can reuse it.
 fn build_appearance(doc: &Document, d: &Dict) -> Option<Stream> {
-    let mut stream = appearance::build(d)?;
+    let mut stream = appearance::build_with_doc(Some(doc), d)?;
     // Picture-stamp restyling must retain the placement's page-axis correction.
     if d.get(b"PCPicture").is_some() {
         let matrix = d.get(b"AP").and_then(|ap| {
@@ -1561,6 +1565,9 @@ pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, m
         // text editable (as in Acrobat), so the re-fit ignores the lock. New text is drawn even
         // where the standard fonts can't draw some of it (marked and reported, see
         // `draw_appearance`).
+        if text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r')) {
+            let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
+        }
         match fitted_box(doc, r, text) {
             Some(rect) => apply_text_box(doc, r, rect, meta, true)?,
             None => draw_appearance(doc, r)?,
@@ -1587,15 +1594,35 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
         rect
     };
     let (x0, top) = (tb[0].min(tb[2]), tb[1].max(tb[3]));
+    let fallback_metrics = if text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r')) {
+        doc.scan_objects().find_map(|(_, obj)| {
+            if let Object::Dict(fd) = obj.as_ref() {
+                if fd.get(b"PCFallback") == Some(&Object::Bool(true)) {
+                    return Some(pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd));
+                }
+            }
+            None
+        })
+    } else {
+        None
+    };
+    let measure = |s: &str, sz: f64| {
+        if let Some(metrics) = &fallback_metrics {
+            if let Some(codes) = metrics.encode(s) {
+                return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
+            }
+        }
+        appearance::text_width(s, sz)
+    };
     let w = tb[2] - tb[0];
     let w = if w.is_finite() && w >= 1.0 {
         w
     } else {
         // No usable old width: fall back to the creation-time width (at most 300 pt).
-        let longest = text.lines().map(|l| appearance::text_width(l, size)).fold(0.0, f64::max);
+        let longest = text.lines().map(|l| measure(l, size)).fold(0.0, f64::max);
         (longest + 2.0 * pad + 4.0).clamp(40.0, 300.0)
     };
-    let lines = appearance::wrap(text, size, (w - 2.0 * pad).max(1.0)).len().max(1) as f64;
+    let lines = pdfcraft_fonts::wrap_with(text, size, (w - 2.0 * pad).max(1.0), measure).len().max(1) as f64;
     Some([x0, top - lines * size * 1.2 - 2.0 * pad - 2.0, x0 + w, top])
 }
 

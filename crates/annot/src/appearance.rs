@@ -10,8 +10,8 @@
 //! Helvetica font with WinAnsi encoding; line breaking uses [`text_width`], an approximation of
 //! Helvetica's proportions by character class (no font program or metrics file is bundled).
 
-use pdfcraft_cos::{Dict, Object, PdfString, Stream};
-use pdfcraft_fonts::{first_undrawable, literal, win_ansi};
+use pdfcraft_cos::{Dict, Document, Object, PdfString, Stream};
+use pdfcraft_fonts::{first_undrawable, first_undrawable_with_fallback, literal, win_ansi, wrap_with};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
 
 use crate::{NOTE_SIZE, Rgb, n};
@@ -290,13 +290,23 @@ pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
         b"Redact" => ("the redaction's overlay text", text(b"OverlayText")?),
         _ => return None,
     };
-    Some((what, first_undrawable(&text)?))
+    if d.name(b"Subtype") == Some(b"FreeText") {
+        Some((what, first_undrawable_with_fallback(&text)?))
+    } else {
+        Some((what, first_undrawable(&text)?))
+    }
 }
 
 /// Draw the normal appearance of an annotation, or `None` if this subtype/variant isn't supported.
 /// Text the standard fonts can't draw comes out as `?`: [`undrawable_text`] says which, and
 /// [`crate::set_appearance`] marks the annotation with it (`pdfcraft_fonts::UNDRAWN_MARK`).
 pub fn build(d: &Dict) -> Option<Stream> {
+    build_with_doc(None, d)
+}
+
+/// Like [`build`], but providing `doc` so that annotations with characters outside WinAnsi can
+/// reference the embedded Unicode fallback font.
+pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
     // Imported measurement appearances may include leaders, captions and formatting that
     // this builder cannot reproduce. Preserve them rather than silently losing detail.
     if d.contains(b"Measure") && !d.contains(b"PCMeasureValue") {
@@ -735,41 +745,82 @@ pub fn build(d: &Dict) -> Option<Stream> {
             let pad = 2.0 + bw;
             let width = (rect[2] - rect[0] - 2.0 * pad).max(1.0);
             let q = d.int(b"Q").unwrap_or(0);
+            let needs_fallback = text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r'));
+            let fallback_info = if needs_fallback {
+                doc.and_then(|doc| {
+                    for (r, obj) in doc.scan_objects() {
+                        if let Object::Dict(fd) = obj.as_ref() {
+                            if fd.get(b"PCFallback") == Some(&Object::Bool(true)) {
+                                return Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)));
+                            }
+                        }
+                    }
+                    None
+                })
+            } else {
+                None
+            };
+            let (font_tag, fonts_dict) = match &fallback_info {
+                Some((font_ref, _)) => {
+                    let mut fonts = Dict::new();
+                    fonts.set(b"PCFallback".to_vec(), Object::Ref(*font_ref));
+                    ("/PCFallback", fonts)
+                }
+                None => {
+                    let mut font = Dict::new();
+                    font.set(b"Type".to_vec(), Object::name("Font"));
+                    font.set(b"Subtype".to_vec(), Object::name("Type1"));
+                    font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
+                    font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
+                    let mut fonts = Dict::new();
+                    fonts.set(b"Helv".to_vec(), Object::Dict(font));
+                    ("/Helv", fonts)
+                }
+            };
+            let measure = |s: &str, sz: f64| {
+                if let Some((_, metrics)) = &fallback_info {
+                    if let Some(codes) = metrics.encode(s) {
+                        return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
+                    }
+                }
+                text_width(s, sz)
+            };
+            let lines = wrap_with(&text, size, width, measure);
             c.push_str(&format!(
-                "{} {} {} {} re W n\nBT\n/Helv {} Tf\n{}",
+                "{} {} {} {} re W n\nBT\n{} {} Tf\n{}",
                 n(rect[0]),
                 n(rect[1]),
                 n(rect[2] - rect[0]),
                 n(rect[3] - rect[1]),
+                font_tag,
                 n(size),
                 rg(text_color)
             ));
             let mut out = c.into_bytes();
             let mut y = rect[3] - pad - size * 0.9;
-            for line in wrap(&text, size, width) {
+            for line in lines {
                 if y < rect[1] - size {
                     break;
                 }
-                let lw = text_width(&line, size);
+                let lw = measure(&line, size);
                 let x = match q {
                     1 => rect[0] + pad + (width - lw) / 2.0,
                     2 => rect[2] - pad - lw,
                     _ => rect[0] + pad,
                 };
                 out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
-                out.extend(literal(&win_ansi(&line)));
+                if let Some((_, metrics)) = &fallback_info
+                    && let Some(codes) = metrics.encode(&line)
+                {
+                    out.extend(literal(&codes));
+                } else {
+                    out.extend(literal(&win_ansi(&line)));
+                }
                 out.extend_from_slice(b" Tj\n");
                 y -= size * 1.2;
             }
             out.extend_from_slice(b"ET\n");
-            let mut font = Dict::new();
-            font.set(b"Type".to_vec(), Object::name("Font"));
-            font.set(b"Subtype".to_vec(), Object::name("Type1"));
-            font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
-            font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-            let mut fonts = Dict::new();
-            fonts.set(b"Helv".to_vec(), Object::Dict(font));
-            res.set(b"Font".to_vec(), Object::Dict(fonts));
+            res.set(b"Font".to_vec(), Object::Dict(fonts_dict));
             let mut stream = form(full, &out, res);
             if let Some(m) = matrix {
                 stream.dict.set(b"Matrix".to_vec(), Object::Array(m.iter().copied().map(Object::Real).collect()));

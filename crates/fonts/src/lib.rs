@@ -210,6 +210,17 @@ pub fn first_undrawable(s: &str) -> Option<char> {
     s.chars().find(|c| !matches!(c, '\n' | '\r') && !win_ansi_encodable(*c))
 }
 
+/// Whether the bundled fallback font (`INTER_REGULAR`) has a glyph for `c`.
+pub fn fallback_has_char(c: char) -> bool {
+    use skrifa::MetadataProvider;
+    skrifa::FontRef::new(INTER_REGULAR).ok().and_then(|f| f.charmap().map(c)).is_some()
+}
+
+/// The first character of `s` that neither the standard fonts nor the fallback font can draw.
+pub fn first_undrawable_with_fallback(s: &str) -> Option<char> {
+    s.chars().find(|c| !matches!(c, '\n' | '\r') && !win_ansi_encodable(*c) && !fallback_has_char(*c))
+}
+
 /// The error for text the standard fonts can't draw ([`first_undrawable`]): which character, in
 /// what (`"the comment"`, `"the reason"`), and what can be written instead. One wording for every
 /// path that writes text in the standard fonts, so agents and users can act on it the same way.

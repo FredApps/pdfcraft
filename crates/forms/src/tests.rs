@@ -440,6 +440,35 @@ fn unavailable_glyph_uses_an_appearance_font_without_changing_the_source_font() 
 }
 
 #[test]
+fn polish_characters_in_form_field_use_fallback_font_without_question_marks() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>".into(),
+        "<< /Fields [6 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (miasto) /Rect [50 700 450 730] /P 3 0 R >>".into(),
+    ];
+    let mut doc = document(&objs);
+    let original_font = doc.get(ObjRef::new(5, 0)).as_ref().clone();
+    let value = "Płock, Gdańsk, Kraków i Poznań: 123 zł";
+    set_value(&mut doc, "miasto", &FieldValue::Text(value.into())).unwrap();
+    let doc = reopen(&doc);
+    assert_eq!(doc.get(ObjRef::new(5, 0)).as_ref(), &original_font);
+    let all = fields(&doc);
+    let f = field(&all, "miasto");
+    assert_eq!(f.value, [value]);
+    assert_eq!(undrawn_fields(&doc), Vec::<(String, char)>::new(), "no undrawn marks on Polish text");
+    assert!(!need_appearances(&doc), "appearance is completely drawn with embedded font");
+    let (font, lines) = appearance_text(&doc, &f.widgets[0], b"PCFallback");
+    let font = font.as_dict().unwrap();
+    assert_eq!(font.name(b"Subtype"), Some(&b"Type0"[..]));
+    let metrics = pdfcraft_fonts::pdf::Metrics::from_dict(&doc, font);
+    let shown = lines.concat();
+    assert_eq!(metrics.decode(&shown), value);
+}
+
+#[test]
 fn multiline_wrapping_keeps_encodable_text_without_requiring_ascii_space() {
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),

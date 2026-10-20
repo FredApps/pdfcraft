@@ -100,6 +100,32 @@ fn stream(doc: &mut Document, bytes: Vec<u8>) -> Object {
     Object::Ref(doc.add(Object::Stream(Stream::from_raw(Dict::new(), bytes))))
 }
 
+/// Resource name used for the Unicode fallback font.
+pub const FALLBACK_FONT_NAME: &str = "PCFallback";
+
+/// Ensure the document has the Unicode fallback font (Inter Regular) embedded as a Type 0 CIDFont.
+/// Reuses the existing Type 0 font if already embedded, otherwise embeds it.
+pub fn ensure_fallback_font(doc: &mut Document) -> Result<pdfcraft_cos::ObjRef, String> {
+    for (r, obj) in doc.scan_objects() {
+        if let Object::Dict(d) = obj.as_ref() {
+            if d.get(b"PCFallback") == Some(&Object::Bool(true)) {
+                return Ok(r);
+            }
+        }
+    }
+    let mut fonts = Dict::new();
+    let name = embed(doc, &mut fonts, crate::script::INTER_REGULAR, "Inter")?;
+    let font_ref = match fonts.get(name.as_bytes()) {
+        Some(Object::Ref(r)) => *r,
+        _ => return Err("embedded font object reference missing".into()),
+    };
+    doc.update_dict(font_ref, |d| {
+        d.set(b"PCFallback".to_vec(), Object::Bool(true));
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(font_ref)
+}
+
 /// Embed the complete font once and provide separate CIDs for Unicode aliases. /ToUnicode,
 /// /CIDToGIDMap and widths agree, including supplementary characters, so reopening needs no
 /// installed font. Keeping the full program also lets subsequent edits add other glyphs.

@@ -156,6 +156,26 @@ pub(crate) fn ensure_form(doc: &mut Document) -> Result<ObjRef, FormError> {
     Ok(r)
 }
 
+pub use pdfcraft_fonts::embedding::FALLBACK_FONT_NAME;
+
+/// Ensure the form's `/DR` contains a Unicode fallback font (`PCFallback`, Inter Regular)
+/// that can draw Central European, Polish, Cyrillic and other Unicode characters.
+pub fn ensure_fallback_font(doc: &mut Document) -> Result<String, FormError> {
+    let font_ref = pdfcraft_fonts::embedding::ensure_fallback_font(doc).map_err(FormError::Invalid)?;
+    let af_ref = ensure_form(doc)?;
+    let af = doc.get(af_ref).as_dict().cloned().unwrap_or_default();
+    let mut dr = af.get(b"DR").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    let mut fonts = dr.get(b"Font").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    if fonts.get(FALLBACK_FONT_NAME.as_bytes()).is_none() {
+        fonts.set(FALLBACK_FONT_NAME.as_bytes().to_vec(), Object::Ref(font_ref));
+        dr.set(b"Font".to_vec(), Object::Dict(fonts));
+        let mut af = doc.get(af_ref).as_dict().cloned().unwrap_or_default();
+        af.set(b"DR".to_vec(), Object::Dict(dr));
+        doc.set(af_ref, Object::Dict(af));
+    }
+    Ok(FALLBACK_FONT_NAME.to_string())
+}
+
 /// The Appearance tab: borders, colours and text.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
@@ -686,6 +706,11 @@ pub fn redraw_field(doc: &mut Document, name: &str) -> Result<(), FormError> {
 
 fn redraw_widgets(doc: &mut Document, name: &str, only: Option<usize>) -> Result<(), FormError> {
     let f = fields(doc).into_iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?;
+    let needs_fallback = f.value.iter().any(|v| pdfcraft_fonts::first_undrawable(v).is_some())
+        || f.options.iter().any(|(_, d)| pdfcraft_fonts::first_undrawable(d).is_some());
+    if needs_fallback {
+        let _ = ensure_fallback_font(doc);
+    }
     let mut undrawn = false;
     for (index, w) in f.widgets.iter().enumerate() {
         if only.is_some_and(|only| only != index) {
