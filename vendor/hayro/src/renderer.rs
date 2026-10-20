@@ -734,39 +734,36 @@ impl Renderer {
         // the nearest resize, which has no such limit, rather than to its full-resolution data.
         let nearest = Scaler::new(ResamplingFunction::Nearest);
         let scaler = if smooth { &self.scaler } else { &nearest };
-        // The input is owned, so a possible nearest fallback keeps its own copy of it.
-        let (first, fallback) = if smooth && !explicit_interpolate {
-            (data.clone(), Some(data))
-        } else {
-            (data, None)
-        };
+        // A refused plan returns the owned input unchanged, so the nearest retry reuses it
+        // instead of copying the source buffer (an unchecked clone could abort on a huge image).
         let mut resized = Self::resize_format(
             self,
             pixel_format,
             scaler,
             smooth,
-            first,
+            data,
             src_width,
             src_height,
             new_width,
             new_height,
         );
-        if resized.is_err() {
-            if let Some(data) = fallback {
+        resized = match resized {
+            Err(original) if smooth && !explicit_interpolate => {
                 log::warn!("Smooth image resampling was refused; falling back to nearest-neighbour");
-                resized = Self::resize_format(
+                Self::resize_format(
                     self,
                     pixel_format,
                     &nearest,
                     false,
-                    data,
+                    original,
                     src_width,
                     src_height,
                     new_width,
                     new_height,
-                );
+                )
             }
-        }
+            other => other,
+        };
         match resized {
             Ok(out) => (out, new_width, new_height),
             Err(original) => {
