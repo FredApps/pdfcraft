@@ -133,6 +133,10 @@ impl ImageState {
         Self { placement: Placement { matrix, clip, clips }, stack: Vec::new(), path: BezPath::new(), pending_clip: None }
     }
 
+    fn current_point(&self) -> Option<Point> {
+        self.path.elements().last().and_then(|e| e.end_point())
+    }
+
     fn point(&self, x: f64, y: f64) -> Point {
         let (x, y) = self.placement.matrix.apply(x, y);
         Point::new(x, y)
@@ -166,28 +170,38 @@ impl ImageState {
             }
             b"l" => {
                 if let Some([x, y]) = op.nums::<2>() {
-                    self.path.line_to(self.point(x, y));
+                    if self.current_point().is_some() {
+                        self.path.line_to(self.point(x, y));
+                    }
                 }
             }
             b"c" => {
                 if let Some([x1, y1, x2, y2, x3, y3]) = op.nums::<6>() {
-                    self.path.curve_to(self.point(x1, y1), self.point(x2, y2), self.point(x3, y3));
+                    if self.current_point().is_some() {
+                        self.path.curve_to(self.point(x1, y1), self.point(x2, y2), self.point(x3, y3));
+                    }
                 }
             }
             b"v" => {
-                if let Some([x1, y1, x2, y2]) = op.nums::<4>()
-                    && let Some(current) = self.path.elements().last().and_then(|e| e.end_point())
-                {
-                    self.path.curve_to(current, self.point(x1, y1), self.point(x2, y2));
+                if let Some([x1, y1, x2, y2]) = op.nums::<4>() {
+                    if let Some(current) = self.current_point() {
+                        self.path.curve_to(current, self.point(x1, y1), self.point(x2, y2));
+                    }
                 }
             }
             b"y" => {
                 if let Some([x1, y1, x2, y2]) = op.nums::<4>() {
-                    let end = self.point(x2, y2);
-                    self.path.curve_to(self.point(x1, y1), end, end);
+                    if self.current_point().is_some() {
+                        let end = self.point(x2, y2);
+                        self.path.curve_to(self.point(x1, y1), end, end);
+                    }
                 }
             }
-            b"h" => self.path.close_path(),
+            b"h" => {
+                if self.current_point().is_some() {
+                    self.path.close_path();
+                }
+            }
             b"re" => {
                 if let Some([x, y, w, h]) = op.nums::<4>() {
                     self.path.move_to(self.point(x, y));
@@ -807,4 +821,131 @@ pub(crate) fn translate_images(doc: &mut Document, page: usize, indexes: &[usize
     let contents = crate::text::rewritten_contents(doc, &all, data);
     doc.update_dict(p.obj, |d| d.set(b"Contents".to_vec(), contents))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_doc(content: &str) -> Document {
+        let objs: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /XObject << /Im0 6 0 R >> >> >>".into(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+            "<< /Type /XObject /Subtype /Image /Width 4 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 8 >>\nstream\n\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\nendstream".into(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offs = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offs.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let x = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offs {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+        Document::open(Arc::new(out)).unwrap()
+    }
+
+    #[test]
+    fn path_segment_operators_without_m_do_not_panic_and_are_skipped() {
+        let mut state = ImageState::new(Matrix::IDENTITY, [0.0, 0.0, 600.0, 800.0], Vec::new());
+
+        // Operators before any m or re on empty path must safely skip without panic.
+        state.apply(&Op::new("l", vec![Object::Real(1.0), Object::Real(1.0)])).unwrap();
+        assert!(state.path.elements().is_empty());
+
+        state
+            .apply(&Op::new(
+                "c",
+                vec![Object::Real(1.0), Object::Real(1.0), Object::Real(2.0), Object::Real(2.0), Object::Real(3.0), Object::Real(3.0)],
+            ))
+            .unwrap();
+        assert!(state.path.elements().is_empty());
+
+        state.apply(&Op::new("v", vec![Object::Real(1.0), Object::Real(1.0), Object::Real(2.0), Object::Real(2.0)])).unwrap();
+        assert!(state.path.elements().is_empty());
+
+        state.apply(&Op::new("y", vec![Object::Real(1.0), Object::Real(1.0), Object::Real(2.0), Object::Real(2.0)])).unwrap();
+        assert!(state.path.elements().is_empty());
+
+        state.apply(&Op::new("h", vec![])).unwrap();
+        assert!(state.path.elements().is_empty());
+
+        // Control path with m: subpath initialized, segments are appended properly.
+        state.apply(&Op::new("m", vec![Object::Real(0.0), Object::Real(0.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 1);
+
+        state.apply(&Op::new("l", vec![Object::Real(10.0), Object::Real(10.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 2);
+
+        state
+            .apply(&Op::new(
+                "c",
+                vec![Object::Real(10.0), Object::Real(20.0), Object::Real(20.0), Object::Real(30.0), Object::Real(30.0), Object::Real(40.0)],
+            ))
+            .unwrap();
+        assert_eq!(state.path.elements().len(), 3);
+
+        state.apply(&Op::new("v", vec![Object::Real(40.0), Object::Real(50.0), Object::Real(60.0), Object::Real(70.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 4);
+
+        state.apply(&Op::new("y", vec![Object::Real(70.0), Object::Real(80.0), Object::Real(90.0), Object::Real(100.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 5);
+
+        state.apply(&Op::new("h", vec![])).unwrap();
+        assert_eq!(state.path.elements().len(), 6);
+
+        // After h has closed the subpath, there is no open current point.
+        // Subsequent segment operators must skip safely rather than panic.
+        state.apply(&Op::new("l", vec![Object::Real(1.0), Object::Real(1.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 6);
+
+        state
+            .apply(&Op::new(
+                "c",
+                vec![Object::Real(1.0), Object::Real(1.0), Object::Real(2.0), Object::Real(2.0), Object::Real(3.0), Object::Real(3.0)],
+            ))
+            .unwrap();
+        assert_eq!(state.path.elements().len(), 6);
+
+        state.apply(&Op::new("v", vec![Object::Real(1.0), Object::Real(1.0), Object::Real(2.0), Object::Real(2.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 6);
+
+        state.apply(&Op::new("y", vec![Object::Real(1.0), Object::Real(1.0), Object::Real(2.0), Object::Real(2.0)])).unwrap();
+        assert_eq!(state.path.elements().len(), 6);
+
+        state.apply(&Op::new("h", vec![])).unwrap();
+        assert_eq!(state.path.elements().len(), 6);
+    }
+
+    #[test]
+    fn page_images_handles_malformed_path_segments_before_m() {
+        // Issue #3581 repro streams: path segment operators before any m/re
+        let l_doc = test_doc("q 1 1 l S Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET");
+        assert!(page_images(&l_doc, 0).unwrap().is_empty());
+
+        let c_doc = test_doc("q 1 1 2 2 3 3 c S Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET");
+        assert!(page_images(&c_doc, 0).unwrap().is_empty());
+
+        let y_doc = test_doc("q 1 1 2 2 y S Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET");
+        assert!(page_images(&y_doc, 0).unwrap().is_empty());
+
+        let h_doc = test_doc("q h S Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET");
+        assert!(page_images(&h_doc, 0).unwrap().is_empty());
+
+        // Control stream: valid path with m
+        let control_doc = test_doc("q 0 0 m 1 1 l S Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET");
+        assert!(page_images(&control_doc, 0).unwrap().is_empty());
+
+        // Ensure images on the page are still properly discovered
+        let img_doc = test_doc("q 1 1 l S Q 100 0 0 100 50 50 cm /Im0 Do Q");
+        let images = page_images(&img_doc, 0).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].name, "Im0");
+    }
 }
