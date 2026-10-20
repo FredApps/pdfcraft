@@ -231,6 +231,9 @@ impl TextState {
     ///
     /// Only fill, stroke and fill-then-stroke (`Tr` 0–2) are restated: invisible text is revealed
     /// by [`reveal_ops`] and clipping text is refused, so neither is ever drawn this way.
+    ///
+    /// A `gs` has no inverse, so a selection `current` has and this state doesn't stays in force:
+    /// run these inside a `q`/`Q` that starts from `current`, one per state drawn.
     fn paint_ops(&self, current: &TextState) -> Vec<Op> {
         let n = pdfcraft_content::num;
         let mut v = Vec::new();
@@ -239,6 +242,8 @@ impl TextState {
         for name in self.ext_gstate.iter().skip(shared) {
             v.push(Op::new("gs", vec![Object::Name(name.clone())]));
         }
+        // A reselected ExtGState may set `/LW`, so the width (already the effective one) follows it.
+        let reselected = !v.is_empty();
         if self.stroke != current.stroke {
             if self.stroke.is_empty() {
                 // The initial stroke colour: black in DeviceGray.
@@ -248,7 +253,7 @@ impl TextState {
             }
         }
         let width = self.line_width.unwrap_or(1.0);
-        if width != current.line_width.unwrap_or(1.0) {
+        if reselected || width != current.line_width.unwrap_or(1.0) {
             v.push(Op::new("w", vec![n(width)]));
         }
         if (0..=2).contains(&self.render_mode) && self.render_mode != current.render_mode {
@@ -567,7 +572,7 @@ struct Ts {
     render_mode: i64,
     /// The operators that set the current stroke colour (`G`, `RG`, `K`, or `CS` + `SC`/`SCN`).
     stroke: Vec<Op>,
-    /// The line width a `w` set (`None`: the initial 1.0).
+    /// The line width a `w` or an ExtGState's `/LW` set (`None`: the initial 1.0).
     line_width: Option<f64>,
     /// The ExtGState resources selected with `gs`, oldest first (see [`select_gs`]).
     ext_gstate: Vec<Vec<u8>>,
@@ -878,13 +883,16 @@ type Invocation = (usize, Vec<u8>, Ts);
 fn interpret(
     doc: &Document,
     ops: &[Op],
-    fonts_res: &Dict,
+    // The resources in force: `/Font`, and `/ExtGState` for the line width a `gs` sets.
+    resources: &Dict,
     cache: &mut HashMap<Vec<u8>, (Rc<Metrics>, Option<String>)>,
     carry: &mut Carry,
     mut invoked: Option<&mut Vec<Invocation>>,
     // `Some(properties)`: read `/ActualText`, looking named property lists up in `properties`.
     logical_text: Option<&Dict>,
 ) -> Vec<Shown> {
+    let fonts_res = resources.get(b"Font").and_then(|f| doc.dict(f)).unwrap_or_default();
+    let ext_gstates = resources.get(b"ExtGState").and_then(|g| doc.dict(g)).unwrap_or_default();
     let mut out: Vec<Shown> = Vec::new();
     let mut ts = carry.ts.clone();
     let mut at_bt = (0usize, ts.clone());
@@ -976,6 +984,9 @@ fn interpret(
             b"gs" => {
                 if let Some(name) = op.name(0) {
                     select_gs(&mut ts.ext_gstate, name);
+                    // `/LW` sets the line width as `w` does (ISO 32000-2 §8.4.5).
+                    let lw = ext_gstates.get(name).and_then(|g| doc.dict(g)).and_then(|g| g.get(b"LW").and_then(|w| doc.resolve(w).as_f64()));
+                    ts.line_width = lw.filter(|w| w.is_finite()).or(ts.line_width);
                 }
             }
             b"Tf" => {
@@ -1173,7 +1184,6 @@ fn interpret(
 pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError> {
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
-    let fonts_res = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
     let mut cache = HashMap::new();
     let mut lines: Vec<TextLine> = Vec::new();
     let mut carry = Carry::new();
@@ -1182,7 +1192,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let properties = res.get(b"Properties").and_then(|o| doc.dict(o)).unwrap_or_default();
-    let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, Some(&properties));
+    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, Some(&properties));
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
@@ -1205,7 +1215,11 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, s.face.as_deref())))
                 && (s.text.trim().is_empty()
                     || lines.last().is_some_and(|l| {
-                        (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
+                        (s.size - l.size).abs() < 0.01
+                            && s.bold == l.bold
+                            && s.italic == l.italic
+                            && fill_color(&s.state.fill) == l.color
+                            && same_paint(l, &s.state)
                     }))
                 && near
                 // An OCR layer is one text object over the whole scan: its words continue a line
@@ -1300,7 +1314,11 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, s.face.as_deref())))
             && (s.text.trim().is_empty()
                 || lines.last().is_some_and(|l| {
-                    (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
+                    (s.size - l.size).abs() < 0.01
+                        && s.bold == l.bold
+                        && s.italic == l.italic
+                        && fill_color(&s.state.fill) == l.color
+                        && same_paint(l, &s.state)
                 }))
             && pen.continues(&s, if bt == s.bt { 3.0 } else { 1.5 }).0
     });
@@ -1448,11 +1466,10 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
     }
     /// `stream` gives the stream number of the operator at an index of `ops`.
     fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) {
-        let fonts_res = resources.get(b"Font").map(|f| w.doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
         let mut cache = HashMap::new();
         let mut invoked = Vec::new();
         let properties = resources.get(b"Properties").and_then(|o| w.doc.dict(o)).unwrap_or_default();
-        let shown = interpret(w.doc, ops, &fonts_res, &mut cache, carry, Some(&mut invoked), Some(&properties));
+        let shown = interpret(w.doc, ops, resources, &mut cache, carry, Some(&mut invoked), Some(&properties));
         let mut last = None;
         let mut last_stream = None;
         let mut forms = invoked.into_iter().peekable();
@@ -1537,6 +1554,21 @@ fn is_type3_fallback(font: &Dict) -> bool {
 /// any) continues `line`: the same font resource, or another subset of the same face.
 fn same_font(line: &TextLine, font: &[u8], face: Option<&str>) -> bool {
     line.font.as_bytes() == font || (line.face.is_some() && line.face.as_deref() == face)
+}
+
+/// Whether a run painted with `ts` continues `line` as it is painted: a line is rewritten in the
+/// state of its first run, so a `gs`, stroke colour, line width or `Tr` that changes partway
+/// starts another run (see [`TextState::paint_ops`]). The stroke colour and width only count
+/// for text that is stroked, so a rule drawn between two words doesn't split their line.
+///
+/// Only the visible modes (`Tr` 0–2) that `paint_ops` restates are compared: a line that goes on
+/// as invisible or clipping text stays one line, which the clipping refusal reads whole (#3447).
+fn same_paint(line: &TextLine, ts: &Ts) -> bool {
+    let a = &line.origin.state;
+    let visible = |m: i64| (0..=2).contains(&m);
+    let same_mode = a.render_mode == ts.render_mode || !visible(a.render_mode) || !visible(ts.render_mode);
+    let stroked = matches!((a.render_mode, ts.render_mode), (1 | 2, 1 | 2));
+    same_mode && a.ext_gstate == ts.ext_gstate && (!stroked || (a.stroke == ts.stroke && a.line_width == ts.line_width))
 }
 
 fn source_family(base_font: &str) -> crate::added::Family {
@@ -2105,11 +2137,10 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
     drops.extend(target.lines.iter().filter_map(|i| lines.get(*i)).flat_map(|l| l.ops.iter().copied()));
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
-    let fonts = res.get(b"Font").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let streams = content_streams(doc, &p.dict);
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, None);
+    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, None);
     let mut patches = HashMap::new();
     for s in shown.into_iter().filter(|s| drops.contains(&s.op)) {
         if s.state.render_mode >= 4 {
@@ -2790,7 +2821,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
     let fonts = res.get(b"Font").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, None);
+    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, None);
     let mut patches = HashMap::new();
     // Keep full precision: a tiny rounded text-space change can be magnified by a CTM,
     // and restoring rise/spacing must not alter following unselected text.
