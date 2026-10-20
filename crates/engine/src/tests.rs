@@ -1863,13 +1863,17 @@ fn polish_typewriter_and_form_field_work_without_question_marks() {
     // 2. Add Fill & Sign / Typewriter text with Polish text
     let typed = Shape::Typewriter { rect: [20.0, 100.0, 150.0, 120.0], font_size: 11.0 };
     let style = Style::default_for(&typed);
-    s.apply(id, Edit::AddAnnotation(NewAnnotation {
-        page: 0,
-        shape: typed,
-        style,
-        contents: "Gdańsk, Kraków i Poznań: 123 zł".into(),
-        author: "Marek".into(),
-    })).unwrap();
+    s.apply(
+        id,
+        Edit::AddAnnotation(NewAnnotation {
+            page: 0,
+            shape: typed,
+            style,
+            contents: "Gdańsk, Kraków i Poznań: 123 zł".into(),
+            author: "Marek".into(),
+        }),
+    )
+    .unwrap();
     let d = s.get(id).unwrap();
     assert!(d.edit_notices.is_empty(), "typewriter annotation with Polish text produces no undrawn notices");
     let texts = page_texts(&s, id);

@@ -107,10 +107,10 @@ pub const FALLBACK_FONT_NAME: &str = "PCFallback";
 /// Reuses the existing Type 0 font if already embedded, otherwise embeds it.
 pub fn ensure_fallback_font(doc: &mut Document) -> Result<pdfcraft_cos::ObjRef, String> {
     for (r, obj) in doc.scan_objects() {
-        if let Object::Dict(d) = obj.as_ref() {
-            if d.get(b"PCFallback") == Some(&Object::Bool(true)) {
-                return Ok(r);
-            }
+        if let Object::Dict(d) = obj.as_ref()
+            && d.get(b"PCFallback") == Some(&Object::Bool(true))
+        {
+            return Ok(r);
         }
     }
     let mut fonts = Dict::new();

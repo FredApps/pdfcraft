@@ -219,7 +219,10 @@ pub fn fallback_has_char(c: char) -> bool {
 /// The advance of `s` in the bundled Inter font at `size` points. Characters not present in Inter
 /// fall back to Helvetica's advance.
 pub fn inter_width(s: &str, size: f64) -> f64 {
-    use skrifa::{FontRef, MetadataProvider, instance::{LocationRef, Size}};
+    use skrifa::{
+        FontRef, MetadataProvider,
+        instance::{LocationRef, Size},
+    };
     let Ok(f) = FontRef::new(INTER_REGULAR) else { return helvetica_width(s, size) };
     let charmap = f.charmap();
     let loc = LocationRef::default();

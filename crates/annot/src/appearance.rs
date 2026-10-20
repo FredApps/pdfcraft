@@ -14,7 +14,7 @@ use pdfcraft_cos::{Dict, Document, Object, PdfString, Stream};
 use pdfcraft_fonts::{first_undrawable, first_undrawable_with_fallback, literal, win_ansi, wrap_with};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
 
-use crate::{NOTE_SIZE, AnnotFont, Rgb, n};
+use crate::{AnnotFont, NOTE_SIZE, Rgb, n};
 
 /// Length of an arrowhead for a line of width `w`.
 pub fn arrow_size(w: f64) -> f64 {
@@ -226,10 +226,10 @@ pub fn parse_da(d: &Dict) -> (Rgb, f64, AnnotFont) {
                 if let Some(s) = num(i - 1).filter(|s| *s > 0.0) {
                     size = s;
                 }
-                if i >= 2 {
-                    if let Some(name) = toks.get(i - 2) {
-                        font = AnnotFont::from_resource(name.trim_start_matches('/'));
-                    }
+                if i >= 2
+                    && let Some(name) = toks.get(i - 2)
+                {
+                    font = AnnotFont::from_resource(name.trim_start_matches('/'));
                 }
             }
             _ => {}
@@ -298,11 +298,7 @@ pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
     };
     if d.name(b"Subtype") == Some(b"FreeText") {
         let (_, _, annot_font) = parse_da(d);
-        if annot_font == AnnotFont::Inter {
-            Some((what, first_undrawable_with_fallback(&text)?))
-        } else {
-            Some((what, first_undrawable(&text)?))
-        }
+        if annot_font == AnnotFont::Inter { Some((what, first_undrawable_with_fallback(&text)?)) } else { Some((what, first_undrawable(&text)?)) }
     } else {
         Some((what, first_undrawable(&text)?))
     }
@@ -759,10 +755,10 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
             let fallback_info = if annot_font == AnnotFont::Inter {
                 doc.and_then(|doc| {
                     for (r, obj) in doc.scan_objects() {
-                        if let Object::Dict(fd) = obj.as_ref() {
-                            if fd.get(b"PCFallback") == Some(&Object::Bool(true)) {
-                                return Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)));
-                            }
+                        if let Object::Dict(fd) = obj.as_ref()
+                            && fd.get(b"PCFallback") == Some(&Object::Bool(true))
+                        {
+                            return Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)));
                         }
                     }
                     None
@@ -787,11 +783,26 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
                     (format!("/{}", annot_font.resource()), fonts)
                 }
             };
+            let encode_fallback = |metrics: &pdfcraft_fonts::pdf::Metrics, s: &str| -> Vec<u8> {
+                let q_code = metrics.encode("?").unwrap_or_default();
+                let space_code = metrics.encode(" ").unwrap_or_default();
+                let mut out = Vec::with_capacity(s.len() * 2);
+                let mut buf = [0u8; 4];
+                for ch in s.chars() {
+                    if ch == '\t' {
+                        out.extend_from_slice(&space_code);
+                    } else if let Some(code) = metrics.encode(ch.encode_utf8(&mut buf)) {
+                        out.extend_from_slice(&code);
+                    } else {
+                        out.extend_from_slice(&q_code);
+                    }
+                }
+                out
+            };
             let measure = |s: &str, sz: f64| {
                 if let Some((_, metrics)) = &fallback_info {
-                    if let Some(codes) = metrics.encode(s) {
-                        return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
-                    }
+                    let codes = encode_fallback(metrics, s);
+                    return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
                 }
                 annot_font.text_width(s, sz)
             };
@@ -819,9 +830,8 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
                     _ => rect[0] + pad,
                 };
                 out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
-                if let Some((_, metrics)) = &fallback_info
-                    && let Some(codes) = metrics.encode(&line)
-                {
+                if let Some((_, metrics)) = &fallback_info {
+                    let codes = encode_fallback(metrics, &line);
                     out.extend(literal(&codes));
                 } else {
                     out.extend(literal(&win_ansi(&line)));

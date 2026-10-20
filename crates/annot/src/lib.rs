@@ -1234,7 +1234,11 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             }
             let size = if font_size.is_finite() && *font_size > 0.0 { font_size.clamp(1.0, 400.0) } else { 12.0 };
             let [r, g, b] = style.color.map(|x| x.clamp(0.0, 1.0));
-            let font = if new.contents.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r')) {
+            let font = if new
+                .contents
+                .chars()
+                .any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r') && pdfcraft_fonts::fallback_has_char(c))
+            {
                 let _ = pdfcraft_fonts::embedding::ensure_fallback_font(doc);
                 AnnotFont::Inter
             } else {
@@ -1596,7 +1600,8 @@ pub fn delete_annotation(doc: &mut Document, page: usize, index: usize) -> Resul
 pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, meta: &Meta) -> Result<(), AnnotError> {
     let (_, r) = annot_ref(doc, page, index)?;
     let free_text = annot_dict(doc, r).name(b"Subtype") == Some(b"FreeText");
-    let needs_fallback = text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r'));
+    let needs_fallback =
+        text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r') && pdfcraft_fonts::fallback_has_char(c));
     if free_text {
         let (col, size, font) = appearance::parse_da(&annot_dict(doc, r));
         if font == AnnotFont::Helvetica && needs_fallback {
@@ -1604,7 +1609,9 @@ pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, m
             doc.update_dict(r, |d| {
                 d.set(
                     b"DA".to_vec(),
-                    PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), AnnotFont::Inter.resource(), n(size)).into_bytes()),
+                    PdfString::literal(
+                        format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), AnnotFont::Inter.resource(), n(size)).into_bytes(),
+                    ),
                 );
             })?;
         } else if font == AnnotFont::Inter {
@@ -1652,12 +1659,12 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
         rect
     };
     let (x0, top) = (tb[0].min(tb[2]), tb[1].max(tb[3]));
-    let fallback_metrics = if text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r')) {
+    let fallback_metrics = if font == AnnotFont::Inter {
         doc.scan_objects().find_map(|(_, obj)| {
-            if let Object::Dict(fd) = obj.as_ref() {
-                if fd.get(b"PCFallback") == Some(&Object::Bool(true)) {
-                    return Some(pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd));
-                }
+            if let Object::Dict(fd) = obj.as_ref()
+                && fd.get(b"PCFallback") == Some(&Object::Bool(true))
+            {
+                return Some(pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd));
             }
             None
         })
@@ -1666,9 +1673,20 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
     };
     let measure = |s: &str, sz: f64| {
         if let Some(metrics) = &fallback_metrics {
-            if let Some(codes) = metrics.encode(s) {
-                return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
+            let q_code = metrics.encode("?").unwrap_or_default();
+            let space_code = metrics.encode(" ").unwrap_or_default();
+            let mut codes = Vec::with_capacity(s.len() * 2);
+            let mut buf = [0u8; 4];
+            for ch in s.chars() {
+                if ch == '\t' {
+                    codes.extend_from_slice(&space_code);
+                } else if let Some(code) = metrics.encode(ch.encode_utf8(&mut buf)) {
+                    codes.extend_from_slice(&code);
+                } else {
+                    codes.extend_from_slice(&q_code);
+                }
             }
+            return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
         }
         font.text_width(s, sz)
     };
@@ -2048,7 +2066,10 @@ pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, m
     let before = d;
     doc.update_dict(r, |d| {
         let (col, _, font) = appearance::parse_da(d);
-        d.set(b"DA".to_vec(), PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), font.resource(), n(size)).into_bytes()));
+        d.set(
+            b"DA".to_vec(),
+            PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), font.resource(), n(size)).into_bytes()),
+        );
         rich_text(d);
         touch(d, meta);
     })?;
@@ -2088,7 +2109,10 @@ pub fn set_font(doc: &mut Document, page: usize, index: usize, font: AnnotFont, 
     }
     doc.update_dict(r, |d| {
         let (col, size, _) = appearance::parse_da(d);
-        d.set(b"DA".to_vec(), PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), font.resource(), n(size)).into_bytes()));
+        d.set(
+            b"DA".to_vec(),
+            PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(col[0]), n(col[1]), n(col[2]), font.resource(), n(size)).into_bytes()),
+        );
         rich_text(d);
         touch(d, meta);
     })?;
