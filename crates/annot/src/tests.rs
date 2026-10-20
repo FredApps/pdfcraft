@@ -530,13 +530,102 @@ fn polish_characters_in_typewriter_and_text_box_use_fallback_font_without_questi
         &meta("pl"),
     )
     .unwrap();
-    let doc = reopen(&doc);
+    let mut doc = reopen(&doc);
     let all = list(&doc, 1);
     assert_eq!(text(&all[t], b"Contents"), value);
     assert_eq!(pdfcraft_fonts::undrawn_mark(&all[t]), None, "no undrawn marks on Polish text");
+    assert_eq!(props(&doc, 1, t).unwrap().font, Some(AnnotFont::Inter));
     let content = ap_content(&doc, &all[t]);
     assert!(content.contains("/PCFallback 11 Tf"), "uses embedded fallback font, got: {content}");
     assert!(!content.contains('?'), "no question marks in content stream");
+
+    // Explicitly changing font to Times on text containing unsupported chars produces '?' and undrawn mark
+    set_font(&mut doc, 1, t, AnnotFont::Times, &meta("times")).unwrap();
+    let d = &list(&doc, 1)[t];
+    assert_eq!(props(&doc, 1, t).unwrap().font, Some(AnnotFont::Times));
+    assert_eq!(pdfcraft_fonts::undrawn_mark(d), Some('ł'));
+    let ap = ap_content(&doc, d);
+    assert!(ap.contains("/TiRo 11 Tf"));
+    assert!(ap.contains('?'), "question mark appears in appearance for unsupported character");
+
+    // Changing font back to Inter clears '?' and undrawn mark
+    set_font(&mut doc, 1, t, AnnotFont::Inter, &meta("inter")).unwrap();
+    let d = &list(&doc, 1)[t];
+    assert_eq!(props(&doc, 1, t).unwrap().font, Some(AnnotFont::Inter));
+    assert_eq!(pdfcraft_fonts::undrawn_mark(d), None);
+    let ap = ap_content(&doc, d);
+    assert!(ap.contains("/PCFallback 11 Tf"));
+    assert!(!ap.contains('?'));
+
+    // A text box created with Latin text defaults to Helvetica, but editing contents to Polish promotes it to Inter
+    let tb = add_annotation(
+        &mut doc,
+        &NewAnnotation {
+            page: 1,
+            style: Style::default_for(&Shape::TextBox { rect: [100.0, 600.0, 300.0, 640.0], font_size: 12.0 }),
+            shape: Shape::TextBox { rect: [100.0, 600.0, 300.0, 640.0], font_size: 12.0 },
+            contents: "Hello".into(),
+            author: "Marek".into(),
+        },
+        &meta("tb"),
+    )
+    .unwrap();
+    assert_eq!(props(&doc, 1, tb).unwrap().font, Some(AnnotFont::Helvetica));
+    set_contents(&mut doc, 1, tb, "Płock", &meta("edit")).unwrap();
+    assert_eq!(props(&doc, 1, tb).unwrap().font, Some(AnnotFont::Inter));
+    assert_eq!(pdfcraft_fonts::undrawn_mark(&list(&doc, 1)[tb]), None);
+    let ap = ap_content(&doc, &list(&doc, 1)[tb]);
+    assert!(ap.contains("/PCFallback 12 Tf"));
+    assert!(!ap.contains('?'));
+}
+
+#[test]
+fn text_box_font_changes_the_da_and_appearance() {
+    let mut doc = fixture();
+    let t = add_annotation(
+        &mut doc,
+        &NewAnnotation {
+            page: 0,
+            style: Style { color: [1.0, 0.0, 0.0], ..Style::default() },
+            shape: Shape::TextBox { rect: [10.0, 100.0, 150.0, 130.0], font_size: 12.0 },
+            contents: "Hello world".into(),
+            author: "Ada".into(),
+        },
+        &meta("t"),
+    )
+    .unwrap();
+
+    let p = props(&doc, 0, t).unwrap();
+    assert_eq!(p.font, Some(AnnotFont::Helvetica));
+    assert_eq!(p.font_size, Some(12.0));
+
+    // Change font to Times
+    set_font(&mut doc, 0, t, AnnotFont::Times, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"DA"), "1 0 0 rg /TiRo 12 Tf");
+    let ap = ap_content(&doc, d);
+    assert!(ap.contains("/TiRo 12 Tf"), "appearance uses /TiRo: {ap}");
+    assert_eq!(props(&doc, 0, t).unwrap().font, Some(AnnotFont::Times));
+
+    // Change font to Courier
+    set_font(&mut doc, 0, t, AnnotFont::Courier, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"DA"), "1 0 0 rg /Cour 12 Tf");
+    let ap = ap_content(&doc, d);
+    assert!(ap.contains("/Cour 12 Tf"), "appearance uses /Cour: {ap}");
+    assert_eq!(props(&doc, 0, t).unwrap().font, Some(AnnotFont::Courier));
+
+    // Change size: font is preserved as Courier!
+    set_font_size(&mut doc, 0, t, 16.0, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"DA"), "1 0 0 rg /Cour 16 Tf");
+    assert_eq!(props(&doc, 0, t).unwrap().font, Some(AnnotFont::Courier));
+
+    // Change color: font and size are preserved!
+    set_style(&mut doc, 0, t, Some([0.0, 0.5, 1.0]), None, None, None, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"DA"), "0 0.5 1 rg /Cour 16 Tf");
+    assert_eq!(props(&doc, 0, t).unwrap().font, Some(AnnotFont::Courier));
 }
 
 #[test]

@@ -14,7 +14,7 @@ use pdfcraft_cos::{Dict, Document, Object, PdfString, Stream};
 use pdfcraft_fonts::{first_undrawable, first_undrawable_with_fallback, literal, win_ansi, wrap_with};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
 
-use crate::{NOTE_SIZE, Rgb, n};
+use crate::{NOTE_SIZE, AnnotFont, Rgb, n};
 
 /// Length of an arrowhead for a line of width `w`.
 pub fn arrow_size(w: f64) -> f64 {
@@ -202,12 +202,13 @@ fn rg_stroke(c: Rgb) -> String {
     format!("{} {} {} RG\n", n(c[0]), n(c[1]), n(c[2]))
 }
 
-/// `/DA` of a text box: (text colour, font size). Defaults to black 12 pt.
-pub fn parse_da(d: &Dict) -> (Rgb, f64) {
+/// `/DA` of a text box: (text colour, font size, font). Defaults to black 12 pt Helvetica.
+pub fn parse_da(d: &Dict) -> (Rgb, f64, AnnotFont) {
     let da = d.get(b"DA").and_then(|o| o.as_string()).map(|s| String::from_utf8_lossy(&s.bytes).into_owned()).unwrap_or_default();
     let toks: Vec<&str> = da.split_whitespace().collect();
     let mut col = [0.0; 3];
     let mut size = 12.0;
+    let mut font = AnnotFont::Helvetica;
     let num = |i: usize| toks.get(i).and_then(|t| t.parse::<f64>().ok());
     for (i, t) in toks.iter().enumerate() {
         match *t {
@@ -225,11 +226,16 @@ pub fn parse_da(d: &Dict) -> (Rgb, f64) {
                 if let Some(s) = num(i - 1).filter(|s| *s > 0.0) {
                     size = s;
                 }
+                if i >= 2 {
+                    if let Some(name) = toks.get(i - 2) {
+                        font = AnnotFont::from_resource(name.trim_start_matches('/'));
+                    }
+                }
             }
             _ => {}
         }
     }
-    (col.map(|x| x.clamp(0.0, 1.0)), size.min(400.0))
+    (col.map(|x| x.clamp(0.0, 1.0)), size.min(400.0), font)
 }
 
 fn ext_gstate(opacity: f64, multiply: bool) -> Option<Dict> {
@@ -291,7 +297,12 @@ pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
         _ => return None,
     };
     if d.name(b"Subtype") == Some(b"FreeText") {
-        Some((what, first_undrawable_with_fallback(&text)?))
+        let (_, _, annot_font) = parse_da(d);
+        if annot_font == AnnotFont::Inter {
+            Some((what, first_undrawable_with_fallback(&text)?))
+        } else {
+            Some((what, first_undrawable(&text)?))
+        }
     } else {
         Some((what, first_undrawable(&text)?))
     }
@@ -677,7 +688,7 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
             }
         }
         b"FreeText" => {
-            let (text_color, size) = parse_da(d);
+            let (text_color, size, annot_font) = parse_da(d);
             let bg = stroke;
             let bw = if d.contains(b"BS") || d.contains(b"Border") { border_width(d) } else { 0.0 };
             // A callout: the leader line (arrowhead at its first point), and the text box inside
@@ -745,8 +756,7 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
             let pad = 2.0 + bw;
             let width = (rect[2] - rect[0] - 2.0 * pad).max(1.0);
             let q = d.int(b"Q").unwrap_or(0);
-            let needs_fallback = text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r'));
-            let fallback_info = if needs_fallback {
+            let fallback_info = if annot_font == AnnotFont::Inter {
                 doc.and_then(|doc| {
                     for (r, obj) in doc.scan_objects() {
                         if let Object::Dict(fd) = obj.as_ref() {
@@ -760,21 +770,21 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
             } else {
                 None
             };
-            let (font_tag, fonts_dict) = match &fallback_info {
+            let (font_tag, fonts_dict): (String, Dict) = match &fallback_info {
                 Some((font_ref, _)) => {
                     let mut fonts = Dict::new();
                     fonts.set(b"PCFallback".to_vec(), Object::Ref(*font_ref));
-                    ("/PCFallback", fonts)
+                    ("/PCFallback".to_string(), fonts)
                 }
                 None => {
                     let mut font = Dict::new();
                     font.set(b"Type".to_vec(), Object::name("Font"));
                     font.set(b"Subtype".to_vec(), Object::name("Type1"));
-                    font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
+                    font.set(b"BaseFont".to_vec(), Object::name(annot_font.base_font()));
                     font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
                     let mut fonts = Dict::new();
-                    fonts.set(b"Helv".to_vec(), Object::Dict(font));
-                    ("/Helv", fonts)
+                    fonts.set(annot_font.resource().as_bytes().to_vec(), Object::Dict(font));
+                    (format!("/{}", annot_font.resource()), fonts)
                 }
             };
             let measure = |s: &str, sz: f64| {
@@ -783,7 +793,7 @@ pub fn build_with_doc(doc: Option<&Document>, d: &Dict) -> Option<Stream> {
                         return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
                     }
                 }
-                text_width(s, sz)
+                annot_font.text_width(s, sz)
             };
             let lines = wrap_with(&text, size, width, measure);
             c.push_str(&format!(
