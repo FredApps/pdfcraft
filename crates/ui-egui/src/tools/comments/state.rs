@@ -129,8 +129,8 @@ pub struct CommentView {
     /// The selected comment: (page, index in `/Annots`). With several selected (`also`), the one
     /// the handles, the properties and the context menu act on.
     pub selected: Option<(usize, usize)>,
-    /// The other selected comments (⌘/Ctrl-click or ⇧-click adds one): Delete, Copy and a drag
-    /// act on them with `selected`.
+    /// The other selected comments (⌘/Ctrl-click or ⇧-click on the page adds one, ⇧-click in the
+    /// Comments panel a range): Delete, Copy, Properties and a drag act on them with `selected`.
     pub also: Vec<(usize, usize)>,
     /// Copy the selected comments (set by the menus; the app has the clipboard).
     pub copy_request: bool,
@@ -217,6 +217,17 @@ impl CommentView {
     pub fn select_only(&mut self, key: (usize, usize)) {
         self.selected = Some(key);
         self.also.clear();
+    }
+
+    /// ⇧-click in a list (`order`, as shown): every comment from the one with the handles to
+    /// `key` is selected, and only those, so another ⇧-click from the same comment changes the
+    /// range. Without a comment with the handles, or with either end not in the list, `key` is
+    /// added as by ⌘/Ctrl-click.
+    pub fn select_range(&mut self, order: &[(usize, usize)], key: (usize, usize)) {
+        let ends = self.selected.and_then(|anchor| Some((order.iter().position(|k| *k == anchor)?, order.iter().position(|k| *k == key)?)));
+        let Some((a, b)) = ends else { return self.toggle(key) };
+        let anchor = self.selected;
+        self.also = order.get(a.min(b)..=a.max(b)).unwrap_or_default().iter().copied().filter(|k| Some(*k) != anchor).collect();
     }
 
     /// ⌘/Ctrl-click: add `key` to the selection, or take it out again. The handles go to the

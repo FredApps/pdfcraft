@@ -376,6 +376,24 @@ fn drawn_shapes_ignore_slips() {
 }
 
 #[test]
+fn shift_click_selects_the_range_from_the_comment_with_the_handles() {
+    let order = [(0, 3), (0, 1), (0, 0), (1, 2), (1, 0)];
+    let mut cv = CommentView::default();
+    cv.select_only((0, 1));
+    cv.select_range(&order, (1, 2));
+    assert_eq!(cv.selection(), vec![(0, 1), (0, 0), (1, 2)], "from the anchor down, the anchor keeps the handles");
+    // Another ⇧-click from the same anchor changes the range, upwards too.
+    cv.select_range(&order, (0, 3));
+    assert_eq!(cv.selection(), vec![(0, 1), (0, 3)]);
+    // Nothing to start from, or a card not in the list: added as by ⌘/Ctrl-click.
+    let mut none = CommentView::default();
+    none.select_range(&order, (0, 0));
+    assert_eq!(none.selection(), vec![(0, 0)]);
+    cv.select_range(&order, (9, 9));
+    assert_eq!(cv.selected, Some((9, 9)));
+}
+
+#[test]
 fn text_boxes_fit_their_text() {
     let r = text_box_rect([100.0, 500.0], "Hi", 12.0, 0);
     assert_eq!((r[0], r[3]), (100.0, 500.0));

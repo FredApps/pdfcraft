@@ -201,11 +201,17 @@ fn select_input(
         {
             // Dragging one of several selected comments moves them all; any other drag starts
             // a selection of its own.
-            if !cv.is_selected((cx.page, a.index)) {
-                cv.select_only((cx.page, a.index));
+            let grabbed = (cx.page, a.index);
+            if !cv.is_selected(grabbed) {
+                cv.select_only(grabbed);
             } else {
-                cv.selected = Some((cx.page, a.index));
-                cv.also.retain(|k| *k != (cx.page, a.index));
+                // The grabbed one takes the handles; the one that had them stays selected.
+                if let Some(previous) = cv.selected.replace(grabbed)
+                    && previous != grabbed
+                {
+                    cv.also.push(previous);
+                }
+                cv.also.retain(|k| *k != grabbed);
             }
             cv.reveal = true;
             if cx.allowed {
