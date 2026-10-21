@@ -24,8 +24,9 @@ the automation tools) works on it unchanged. The engine does this when it opens 
   page masters chosen by occurrence; a table's header row repeats after a break; presence
   `hidden` takes no space, `invisible` takes space; repeating subforms get their initial
   instances, including zero for optional subforms. Absent instances occupy no space and do not
-  trigger page breaks. This applies in flowed content and in a top-to-bottom container inside
-  positioned content (a table in an area) alike. Intrinsic horizontal flow can split across
+  trigger page breaks; absent table headers are not repeated on continuation pages.
+  Unnamed containers retain their initial occurrence counts even with populated datasets.
+  This applies in flowed content and in a top-to-bottom container inside positioned content (a table in an area) alike. Intrinsic horizontal flow can split across
   pages after a row is removed; explicit `keep intact="contentArea"` or `keep intact="pageArea"`
   keeps such a section together when it fits in a fresh area. Repeated containers measure each
   instance in its own data scope, including optional children and growing text fields.
@@ -133,6 +134,9 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   an already-built snapshot again.
   Exceeding either limit returns an error: the engine discards the working edit/open-script
   transaction and keeps the prior document, rather than publishing partial data or geometry.
+  Field changes and data imports propagate fatal replay/layout failures too, including after
+  earlier scripts or reset operations flushed changes. Ordinary validation warnings still
+  retain the entered value.
   This bounds replay amplification; it is not a general JavaScript allocation budget.
   What open-time scripts change is noted in the document's XFA warnings. Known gaps: the
   engine's loop limit is per call frame, so loops inside nested calls can run far longer; such

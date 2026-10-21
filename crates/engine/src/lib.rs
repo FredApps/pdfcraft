@@ -3183,9 +3183,9 @@ fn xfa_after_data_change(doc: &mut pdfcraft_cos::Document, cx: &mut EditCtx, cal
             .unwrap_or_else(|m| Err(format!("laying the form out again failed unexpectedly ({m})")));
         cx.xfa_datasets = run.datasets;
         cx.xfa_ran_away |= run.ran_away;
-        if let Err(e) = r {
-            cx.xfa_out.errors.push(e);
-        }
+        // Fatal replay/layout failures must discard the whole import or image edit.
+        // Ordinary script and validation diagnostics are already recorded in xfa_out.
+        r.map_err(EditError::Invalid)?;
     }
     let taken = xfa_values_from_datasets(doc).map_err(EditError::Write)?;
     if !taken.is_empty() {
@@ -3752,9 +3752,9 @@ impl Session {
                     .unwrap_or_else(|m| Err(format!("the form's scripts failed unexpectedly ({m})")));
                 cx.xfa_datasets = run.datasets;
                 cx.xfa_ran_away |= run.ran_away;
-                if let Err(e) = ran {
-                    cx.xfa_out.errors.push(e);
-                }
+                // Earlier scripts (or resetData) may already have flushed into next.
+                // Propagate fatal failures before publishing any part of this edit.
+                ran.map_err(EditError::Invalid)?;
             }
         }
         // XFA forms keep their values in the datasets packet too, for Adobe's viewers.

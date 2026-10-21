@@ -172,6 +172,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- 2026-10-21 — M12 (#3941 edge cases): zero-instance overflow headers stay absent; unnamed containers retain initial occurrences in layout and runtime; fatal field-change/import replay errors roll back the entire edit, including flushed prefixes.
 - 2026-10-21 — M12 (#3941 follow-up): repeated flowing subforms and growing fields measure their own indexed data; replay charges actual lookup visits and each rebuilt snapshot once; keep-rule notes distinguish the supported horizontal subset.
 - 2026-10-21 — M12 (#3941 review): repeated table rows measure optional cells per instance; instance-effect batches cache counts/defaults with bounded replay and rollback regressions. Documented dormant templates, invalidation rules and occurrence tests.
 

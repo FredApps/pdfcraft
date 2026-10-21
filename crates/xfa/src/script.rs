@@ -305,7 +305,7 @@ impl Walker<'_> {
                     let from_data = self
                         .data
                         .filter(|d| !d.children.is_empty())
-                        .map(|d| sf.common.name.as_ref().map_or(0, |name| d.count(&data_path(self.tpl, parent_som), name)));
+                        .and_then(|d| sf.common.name.as_ref().map(|name| d.count(&data_path(self.tpl, parent_som), name)));
                     let instances = crate::layout::instance_count(&sf.occur, from_data);
                     // Keep default definitions independently of live instances, so removing
                     // the last row and adding again in the same event restores defaults.

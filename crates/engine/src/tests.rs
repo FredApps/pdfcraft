@@ -6291,3 +6291,80 @@ fn xfa_instance_work_exhaustion_preserves_the_document() {
     assert!(!s.get(id).unwrap().form.iter().any(|f| f.name.starts_with("entry")));
     assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "other").unwrap().value, ["before"]);
 }
+
+/// Field-change replay must reject the whole edit even after earlier scripts or reset
+/// have flushed structural, value and property changes into the working document.
+#[test]
+fn xfa_field_change_work_exhaustion_rolls_back_flushed_changes() {
+    for reset in [false, true] {
+        let prefix = "_row.addInstance(1); add.presence = 'invisible'; remove.access = 'readOnly';";
+        let expensive = "for (var i=0; i&lt;400; i++) { _row.addInstance(1); other.presence = i % 2 ? 'visible' : 'invisible'; }";
+        let events = if reset {
+            format!(
+                r#"<event activity="exit"><script contentType="application/x-javascript">{prefix} xfa.host.resetData("other"); {expensive}</script></event>"#
+            )
+        } else {
+            format!(
+                r#"<event activity="change"><script contentType="application/x-javascript">{prefix}</script></event>
+                <event activity="exit"><script contentType="application/x-javascript">{expensive}</script></event>"#
+            )
+        };
+        let tpl = pdfcraft_xfa::fixtures::optional_rows(0)
+            .replace(r#"max="2""#, r#"max="-1""#)
+            .replace(r#"<field name="other" w="200pt" h="20pt"><ui><textEdit/></ui></field>"#,
+                &format!(r#"<subform name="unrelated" presence="hidden">{}</subform><field name="other" w="200pt" h="20pt"><ui><textEdit/></ui>{events}</field>"#, r#"<field name="unused"/>"#.repeat(6000)));
+        let mut s = Session::new().with_clock(|| 1_700_000_000);
+        let id = s.open("field-rollback.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+        // Preserve both an existing undo entry and redo entry on rejection.
+        s.run_javascript(id, "", Some("add")).unwrap();
+        s.run_javascript(id, "", Some("add")).unwrap();
+        s.undo(id).unwrap();
+        let before = s.save_bytes(id).unwrap();
+        let generation = s.get(id).unwrap().edit_generation();
+        let dirty = s.get(id).unwrap().dirty;
+        let old_value = s.get(id).unwrap().form.iter().find(|f| f.name == "other").unwrap().value.clone();
+        let undo = s.get(id).unwrap().can_undo().map(str::to_string);
+        let redo = s.get(id).unwrap().can_redo().map(str::to_string);
+        let result = s.apply(id, Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("edited".into()) });
+        assert!(result.is_err(), "reset={reset}: the field-change caller must reject failed replay");
+        assert!(result.unwrap_err().to_string().contains("instance-processing work limit"));
+        assert!(s.save_bytes(id).unwrap() == before, "reset={reset}: flushed changes must not be published");
+        assert_eq!(s.get(id).unwrap().edit_generation(), generation);
+        assert_eq!(s.get(id).unwrap().dirty, dirty);
+        assert_eq!(s.get(id).unwrap().can_undo(), undo.as_deref());
+        assert_eq!(s.get(id).unwrap().can_redo(), redo.as_deref());
+        assert_eq!(s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("entry")).count(), 1);
+        assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "other").unwrap().value, old_value);
+    }
+}
+
+/// Calculations following XML import reject the imported data and any flushed prefix
+/// when replay exceeds its budget.
+#[test]
+fn xfa_import_work_exhaustion_rolls_back_imported_data() {
+    let script = r#"if (other.rawValue == 'trigger') {
+        _row.addInstance(1); remove.access = 'readOnly'; xfa.host.resetData("add");
+        for (var i=0; i&lt;400; i++) { _row.addInstance(1); other.presence = i % 2 ? 'visible' : 'invisible'; }
+    }"#;
+    let tpl = pdfcraft_xfa::fixtures::optional_rows(0).replace(r#"max="2""#, r#"max="-1""#).replace(
+        r#"<field name="other" w="200pt" h="20pt"><ui><textEdit/></ui></field>"#,
+        &format!(
+            r#"<subform name="unrelated" presence="hidden">{}</subform><field name="other" w="200pt" h="20pt"><ui><textEdit/></ui>
+                <event activity="calculate"><script contentType="application/x-javascript">{script}</script></event></field>"#,
+            r#"<field name="unused"/>"#.repeat(6000)
+        ),
+    );
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("import-rollback.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+    let before = s.save_bytes(id).unwrap();
+    let generation = s.get(id).unwrap().edit_generation();
+    let dirty = s.get(id).unwrap().dirty;
+    let result = s.apply(id, Edit::ImportData { name: "data.xml".into(), bytes: Arc::new(b"<form><other>trigger</other></form>".to_vec()) });
+    assert!(result.is_err(), "an import must reject failed calculation replay");
+    assert!(result.unwrap_err().to_string().contains("instance-processing work limit"));
+    assert!(s.save_bytes(id).unwrap() == before);
+    assert_eq!(s.get(id).unwrap().edit_generation(), generation);
+    assert_eq!(s.get(id).unwrap().dirty, dirty);
+    assert!(s.get(id).unwrap().can_undo().is_none());
+    assert!(!s.get(id).unwrap().form.iter().any(|f| f.name.starts_with("entry")));
+}

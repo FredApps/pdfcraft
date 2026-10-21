@@ -826,7 +826,8 @@ impl Layouter<'_> {
                     if self.make_room(h)?
                         && let Some(li) = leader
                         && li != ci
-                        && let Some(Node::Subform(l)) = sf.children.get(li)
+                        && let Some(lead @ Node::Subform(l)) = sf.children.get(li)
+                        && self.instances(lead, &ctx.som) > 0
                     {
                         let lh = self.row_height(l, &cols, inner_w, ctx, depth + 1, sibs.at(li));
                         let (_, y, _) = self.cursor();
@@ -862,7 +863,7 @@ impl Layouter<'_> {
         let from_data = self
             .data
             .filter(|d| !d.children.is_empty())
-            .map(|d| sf.common.name.as_ref().map_or(0, |name| d.count(&data_path(self.tpl, parent_som), name)));
+            .and_then(|d| sf.common.name.as_ref().map(|name| d.count(&data_path(self.tpl, parent_som), name)));
         instance_count(&sf.occur, from_data)
     }
 

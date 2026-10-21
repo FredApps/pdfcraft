@@ -341,3 +341,57 @@ fn same_named_growing_fields_measure_their_own_values() {
         assert!((fields[2].rect.y - fields[1].rect.bottom()).abs() < 0.01);
     }
 }
+
+/// An absent overflow leader must stay absent on every continuation page.
+#[test]
+fn zero_instance_overflow_leaders_stay_absent() {
+    let body = r#"<pageSet><pageArea name="body">
+        <contentArea x="10pt" y="10pt" w="300pt" h="70pt"/>
+        <medium short="320pt" long="100pt"/></pageArea></pageSet>
+        <subform name="table" layout="table" columnWidths="100pt"><overflow leader="header"/>
+            <subform name="header" layout="row"><occur min="0" initial="0" max="1"/>
+                <field name="heading" h="20pt"><ui><textEdit/></ui></field>
+            </subform>
+            <subform name="row" layout="row"><occur min="0" max="-1"/>
+                <field name="value" h="40pt"><ui><textEdit/></ui></field>
+            </subform>
+        </subform>"#;
+    for header in ["", "<header/>"] {
+        let data = format!("<form><table>{header}<row/><row/><row/></table></form>");
+        let form = render(body, Some(&data));
+        assert_eq!(form.pages.len(), 3);
+        for page in &form.pages {
+            let fields: Vec<_> = page.items.iter().filter_map(|i| if let Item::Widget(w) = i { Some(w) } else { None }).collect();
+            assert_eq!(fields.len(), if header.is_empty() { 1 } else { 2 });
+            assert_eq!(fields.iter().any(|f| f.som.contains("header[")), !header.is_empty());
+            assert!(fields.iter().all(|f| f.rect.bottom() <= 80.01));
+        }
+    }
+}
+
+/// Unnamed containers use occurrence defaults even when unrelated data is present.
+#[test]
+fn unnamed_subforms_keep_initial_instances_in_layout_and_runtime() {
+    for initial in [0, 1, 2] {
+        let body = format!(
+            r#"<subform layout="tb" w="100pt"><occur min="0" initial="{initial}" max="2"/>
+            <field name="value" w="100pt" h="20pt"><ui><textEdit/></ui></field></subform>"#
+        );
+        let (tpl, _) = parse(&format!(r#"<template><subform name="form" layout="tb">{body}</subform></template>"#)).unwrap();
+        let data = parse_datasets(
+            r#"<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data><form><unrelated/></form></xfa:data></xfa:datasets>"#,
+        )
+        .unwrap();
+        // Check runtime independently of geometry: scripts must see exactly the visible instances.
+        let live = crate::form_tree(&tpl, Some(&data), &Default::default());
+        let mut pending = vec![&live.root];
+        let mut values = 0;
+        while let Some(n) = pending.pop() {
+            values += usize::from(n.name == "value");
+            pending.extend(&n.children);
+        }
+        assert_eq!(values, initial);
+        let form = render(&body, Some("<form><unrelated/></form>"));
+        assert_eq!(widgets(&form).len(), initial);
+    }
+}
