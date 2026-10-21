@@ -50,7 +50,8 @@ the automation tools) works on it unchanged. The engine does this when it opens 
   filled there shows them here. The engine does both: values on open (recorded in the
   document's warnings), the packet after every form edit.
 
-Layout measures each container once per (node, width): width-less containers would otherwise
+Layout caches container measurements by node, width, inherited style and parent SOM scope:
+width-less containers would otherwise
 be measured exponentially often in their nesting. A measurement budget backs this up.
 
 - **Scripts** (`script`): the live form as scripts see it (`form_tree`: the instance tree with
@@ -119,6 +120,16 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   keeps its live form up to date in place for values (rebuilding it only when the structure
   changed). A form with hundreds of calculations runs them all well within the open budget,
   where each used to pay for a thread of its own and a rebuild of the whole form.
+  Instance-effect replay caches counts and default descendant paths per manager within a
+  script batch. Removing a parent invalidates descendant managers (including shifted sibling
+  paths); writes creating data ancestors, resets and property changes invalidate cached
+  assumptions. Filling a field under an existing data parent keeps the cache. Repeated additions to one
+  unchanged manager do not rebuild unrelated form subtrees. Native replay checks the event
+  deadline, and native/WASM replay share a cumulative 2,000,000-unit work budget per event
+  (snapshot construction/lookup size, invalidation scans, and descendant data operations).
+  Exceeding either limit returns an error: the engine discards the working edit/open-script
+  transaction and keeps the prior document, rather than publishing partial data or geometry.
+  This bounds replay amplification; it is not a general JavaScript allocation budget.
   What open-time scripts change is noted in the document's XFA warnings. Known gaps: the
   engine's loop limit is per call frame, so loops inside nested calls can run far longer; such
   a script is abandoned after 1 s (3 s for a click) on its thread, which keeps running until the

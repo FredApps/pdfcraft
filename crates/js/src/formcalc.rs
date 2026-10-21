@@ -1012,6 +1012,7 @@ impl Interp<'_> {
         }
     }
 
+    /// Resolve a FormCalc member, including instance managers without live rows.
     fn member(&mut self, base: Val, name: &str) -> R<Val> {
         match base {
             Val::Node(i) => self.node_member(i, name),
@@ -1095,6 +1096,7 @@ impl Interp<'_> {
         self.charge(1)
     }
 
+    /// Read a live node property or child, keeping detached manager definitions out of node lists.
     fn node_member(&mut self, i: usize, name: &str) -> R<Val> {
         let Some(n) = self.node(i) else { return Ok(Val::Null) };
         Ok(match name {
@@ -1447,6 +1449,7 @@ impl Interp<'_> {
         Ok(out)
     }
 
+    /// Dispatch FormCalc methods through the same bounded instance operations used by JavaScript.
     fn method(&mut self, base: Val, method: &str, args: &[Expr]) -> R<Val> {
         let m = method.to_ascii_lowercase();
         match base {
@@ -1605,6 +1608,7 @@ impl Interp<'_> {
         }
     }
 
+    /// Apply a FormCalc property assignment, including manager counts, through the shared host.
     fn assign_to(&mut self, target: Val, prop: &str, v: Val) -> R<()> {
         match target {
             Val::Node(i) => {

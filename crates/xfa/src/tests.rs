@@ -2068,6 +2068,7 @@ fn som_indices_count_earlier_same_named_siblings() {
     assert_eq!((0..=children.len()).map(|i| sibs.at(i)).collect::<Vec<_>>(), [0, 0, 1, 0, 2, 1, 0]);
 }
 
+/// Detached definitions retain manager metadata without contributing live fields or events.
 #[test]
 fn zero_instances_have_managers_but_no_live_nodes_or_events() {
     let xml = r#"<template><subform name="form" layout="tb">
@@ -2094,6 +2095,7 @@ fn zero_instances_have_managers_but_no_live_nodes_or_events() {
     assert_eq!(template.instance_templates[0].name, "nested");
 }
 
+/// Deep optional nesting must retain defaults with linear rather than exponential growth.
 #[test]
 fn zero_instances_nested_default_definitions_do_not_expand_exponentially() {
     let mut xml = String::from("<field name=\"leaf\"><value><text>default</text></value></field>");
@@ -2103,6 +2105,7 @@ fn zero_instances_nested_default_definitions_do_not_expand_exponentially() {
     let (tpl, _) = crate::parse(&format!("<template><subform name=\"form\">{xml}</subform></template>")).unwrap();
     let live = crate::form_tree(&tpl, None, &crate::Overrides::default());
     assert!(!live.truncated, "a modest template must not exhaust the runtime node budget");
+    /// Count both live and retained nodes to detect accidental duplication of default subtrees.
     fn count(n: &crate::FormNode) -> usize {
         1 + n.children.iter().chain(&n.instance_templates).map(count).sum::<usize>()
     }

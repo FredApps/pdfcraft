@@ -6146,6 +6146,7 @@ fn xfa_zero_instances_add_remove_undo_and_reopen() {
     assert_eq!(rows(&s, reopened), 2, "the maximum still applies");
 }
 
+/// Removing all initial rows must survive both cached reopen and fresh template layout.
 #[test]
 fn xfa_zero_instances_stay_zero_after_removing_initial_rows_and_reopening() {
     for initial in [0, 1, 2] {
@@ -6177,6 +6178,7 @@ fn xfa_zero_instances_stay_zero_after_removing_initial_rows_and_reopening() {
     }
 }
 
+/// Writing the first dataset must preserve initial rows whose fields have no values.
 #[test]
 fn xfa_zero_instances_blank_initial_rows_survive_first_edit() {
     let tpl = pdfcraft_xfa::fixtures::optional_rows(2).replace("<value><text>default</text></value>", "");
@@ -6189,6 +6191,7 @@ fn xfa_zero_instances_blank_initial_rows_survive_first_edit() {
     assert_eq!(report.fields, 5, "creating the first dataset must not erase empty initial rows");
 }
 
+/// Adding a parent must seed initial nested and empty subforms, including after undo and reopen.
 #[test]
 fn xfa_zero_instances_added_parent_preserves_nested_initial_instances() {
     for nested_initial in [0, 1] {
@@ -6224,4 +6227,67 @@ fn xfa_zero_instances_added_parent_preserves_nested_initial_instances() {
         s.redo(id).unwrap();
         assert_eq!(entries(&s, id), 1);
     }
+}
+
+/// A removed parent shifts SOM indices: cached child managers must follow the new
+/// parent, and a newly added sibling must start from its own template defaults.
+#[test]
+fn xfa_instance_batch_tracks_shifted_parents_and_nested_counts() {
+    let script = r#"var a = _row.addInstance(1); a._inner.addInstance(1);
+        var b = _row.addInstance(1); b._inner.addInstance(1); b._inner.addInstance(1);
+        _row.removeInstance(0);
+        b._inner.removeInstance(0); b._inner.addInstance(1); b._inner.removeInstance(1);
+        _row.addInstance(1)._inner.addInstance(1);
+        b.inner.entry.rawValue = 'kept';"#;
+    let tpl = pdfcraft_xfa::fixtures::optional_rows(0)
+        .replace(r#"<field name="entry""#, r#"<subform name="inner" layout="tb"><occur min="0" initial="1" max="3"/><field name="entry""#)
+        .replace("</value></field>", "</value></field></subform>")
+        .replace("_row.addInstance(1);", script);
+    let mut s = Session::new();
+    let id = s.open("nested-batch.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+    let out = s.run_javascript(id, "", Some("add")).unwrap();
+    assert_eq!(out.error, None, "{out:?}");
+    let bytes = s.save_bytes(id).unwrap();
+    let mut cos = pdfcraft_cos::Document::open(bytes.clone()).unwrap();
+    let data = pdfcraft_xfa::data_of(&cos).unwrap();
+    assert_eq!(data.count(&pdfcraft_xfa::som_to_path("form[0]"), "row"), 2);
+    for index in 0..2 {
+        assert_eq!(data.count(&pdfcraft_xfa::som_to_path(&format!("form[0].row[{index}]")), "inner"), 2);
+    }
+    assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].row[0].inner[0].entry[0]")), Some("kept"));
+    let template = pdfcraft_xfa::template_of(&cos).unwrap();
+    assert_eq!(pdfcraft_xfa::rerender(&mut cos, &template).unwrap().fields, 7);
+    let reopened = s.open("nested-batch-reopened.pdf", None, bytes, None).unwrap();
+    assert_eq!(s.get(reopened).unwrap().form.iter().filter(|f| f.name.starts_with("entry")).count(), 4);
+    s.undo(id).unwrap();
+    assert!(!s.get(id).unwrap().form.iter().any(|f| f.name.starts_with("entry")));
+    s.redo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("entry")).count(), 4);
+}
+
+/// Expensive replay fails the entire engine edit, including earlier value changes,
+/// without changing saved bytes, widgets, or the existing undo history.
+#[test]
+fn xfa_instance_work_exhaustion_preserves_the_document() {
+    let tpl = pdfcraft_xfa::fixtures::optional_rows(0)
+        .replace(r#"max="2""#, r#"max="-1""#)
+        .replace(
+            "_row.addInstance(1);",
+            "for (var i=0; i&lt;400; i++) { _row.addInstance(1); other.rawValue = String(i); other.presence = i % 2 ? 'visible' : 'invisible'; }",
+        )
+        .replace(
+            r#"<field name="other""#,
+            &format!(r#"<subform name="unrelated" presence="hidden">{}</subform><field name="other""#, r#"<field name="unused"/>"#.repeat(3000)),
+        );
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("bounded-batch.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("before".into()) }).unwrap();
+    let before = s.save_bytes(id).unwrap();
+    let undo = s.get(id).unwrap().can_undo().map(str::to_string);
+    let err = s.run_javascript(id, "", Some("add")).unwrap_err().to_string();
+    assert!(err.contains("instance-processing work limit"), "{err}");
+    assert!(s.save_bytes(id).unwrap() == before, "a rejected batch must leave saved bytes unchanged");
+    assert_eq!(s.get(id).unwrap().can_undo(), undo.as_deref());
+    assert!(!s.get(id).unwrap().form.iter().any(|f| f.name.starts_with("entry")));
+    assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "other").unwrap().value, ["before"]);
 }

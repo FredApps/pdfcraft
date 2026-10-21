@@ -28,6 +28,9 @@ const MAX_ERRORS_PER_EVENT: usize = 100;
 /// the calculations every change runs) is held tighter than a click.
 const OPEN_BUDGET_MS: u64 = 3_000;
 const EVENT_BUDGET_MS: u64 = 5_000;
+/// Cumulative host-side replay work per event, on native and WASM. Charges full
+/// snapshot scans, cache invalidation scans, and emitted descendant data operations.
+const MAX_EFFECT_WORK: usize = pdfcraft_xfa::MAX_FORM_NODES * 10;
 
 /// Engine limits for one script: initialize, calculate and validate scripts run without the
 /// user asking (on open, on every change), so they get fewer loop iterations than a click.
@@ -129,6 +132,7 @@ pub(crate) struct XfaRun<'a> {
     pub ran_away: bool,
 }
 
+/// Copy the live tree and its detached definitions into the script-host snapshot.
 fn to_js(n: &FormNode) -> XfaNode {
     XfaNode {
         name: n.name.clone(),
@@ -154,6 +158,7 @@ fn to_js(n: &FormNode) -> XfaNode {
     }
 }
 
+/// Find a live container by exact indexed SOM, without entering dormant definitions.
 fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize) -> Option<&'a FormNode> {
     if depth > 64 {
         return None;
@@ -164,38 +169,48 @@ fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize) -> Option<&'a Fo
     n.children.iter().find_map(|c| find_container(c, som, depth + 1))
 }
 
-fn count_instances(root: &FormNode, parent_som: &str, name: &str) -> usize {
-    let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0) };
-    parent.map_or(0, |p| p.children.iter().filter(|c| c.name == name).count())
+/// Counts and default descendant SOM suffixes for one manager during an effect batch.
+/// Suffixes are rebased for each new row, so the cached definition holds no user values.
+struct InstanceState {
+    count: usize,
+    seeds: Vec<String>,
 }
 
-/// Preserve the live descendant structure of a newly instantiated optional template.
-/// Empty subforms need records too: otherwise the next data merge interprets them as
-/// zero instances. Dormant definitions are deliberately not visited.
-fn instance_seeds(tpl: &Template, root: &FormNode, parent_som: &str, name: &str, som: &str) -> Result<Vec<pdfcraft_xfa::DataOp>, String> {
-    let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0) };
-    let Some(source) = parent.and_then(|p| p.instance_templates.iter().find(|n| n.name == name)) else { return Ok(Vec::new()) };
-    let mut pending = source.children.iter().map(|n| (n, 1usize)).collect::<Vec<_>>();
-    let mut ops = Vec::new();
-    let mut visited = 0;
-    while let Some((node, depth)) = pending.pop() {
-        visited += 1;
-        if depth > 64 || visited > pdfcraft_xfa::MAX_FORM_NODES {
-            return Err("The added XFA instance exceeds the supported structure limits".into());
-        }
-        if node.kind == Some(NodeKind::Subform)
-            && !node.name.is_empty()
-            && node.name != "#subform"
-            && let Some(suffix) = node.som.strip_prefix(&source.som)
-        {
-            let mut path = pdfcraft_xfa::data_path(tpl, &format!("{som}{suffix}"));
-            if let Some((name, index)) = path.pop() {
-                ops.push(pdfcraft_xfa::DataOp::Instances { parent: path, name, count: index.saturating_add(1) });
+impl InstanceState {
+    /// Read a manager once from the current tree. Only live descendants of its retained
+    /// definition seed data; dormant children must stay absent. Traversal is bounded.
+    fn read(root: &FormNode, parent_som: &str, name: &str) -> Result<Self, String> {
+        let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0) };
+        let count = parent.map_or(0, |p| p.children.iter().filter(|c| c.name == name).count());
+        let mut state = Self { count, seeds: Vec::new() };
+        let Some(source) = parent.and_then(|p| p.instance_templates.iter().find(|n| n.name == name)) else { return Ok(state) };
+        let mut pending = source.children.iter().map(|n| (n, 1usize)).collect::<Vec<_>>();
+        let mut visited = 0;
+        while let Some((node, depth)) = pending.pop() {
+            visited += 1;
+            if depth > 64 || visited > pdfcraft_xfa::MAX_FORM_NODES {
+                return Err("The added XFA instance exceeds the supported structure limits".into());
             }
+            if node.kind == Some(NodeKind::Subform)
+                && !node.name.is_empty()
+                && node.name != "#subform"
+                && let Some(suffix) = node.som.strip_prefix(&source.som)
+            {
+                state.seeds.push(suffix.to_string());
+            }
+            pending.extend(node.children.iter().map(|n| (n, depth + 1)));
         }
-        pending.extend(node.children.iter().map(|n| (n, depth + 1)));
+        Ok(state)
     }
-    Ok(ops)
+}
+
+/// Size of a bounded form snapshot, including definitions retained for managers. This
+/// charges rebuilding and lookup work even when unrelated subtrees contain no fields.
+fn form_nodes(node: &FormNode, depth: usize) -> usize {
+    if depth > 64 {
+        return pdfcraft_xfa::MAX_FORM_NODES;
+    }
+    node.children.iter().chain(&node.instance_templates).fold(1usize, |n, c| n.saturating_add(form_nodes(c, depth + 1)))
 }
 
 /// An instance SOM (`…table[0].row[2]`) split into its parent's data path (areas left out,
@@ -294,6 +309,12 @@ struct Runner<'a, 'b> {
     fields: Option<HashMap<String, FieldInfo>>,
     /// The live form as last built; dropped when a script changed the form.
     cached: Option<LiveForm>,
+    /// Snapshot size, refreshed only when the live form is rebuilt.
+    cached_nodes: usize,
+    /// Remaining replay work across all scripts of this event (not reset per batch).
+    effect_work: usize,
+    #[cfg(test)]
+    live_builds: usize,
     /// The script engine for this event: one thread for all its scripts, each run in a fresh
     /// context on the form as it is then (`cached`, kept up to date in place for values and
     /// rebuilt when the structure changed).
@@ -302,6 +323,7 @@ struct Runner<'a, 'b> {
 }
 
 impl<'a, 'b> Runner<'a, 'b> {
+    /// Begin an event with private data/override state and cumulative script and replay budgets.
     fn new(doc: &'a mut pdfcraft_cos::Document, tpl: &'a Template, run: &'a mut XfaRun<'b>, budget_ms: u64) -> Self {
         let data = pdfcraft_xfa::data_of(doc);
         let ov = pdfcraft_xfa::overrides(doc);
@@ -325,6 +347,10 @@ impl<'a, 'b> Runner<'a, 'b> {
             by_path: None,
             fields: None,
             cached: None,
+            cached_nodes: 0,
+            effect_work: MAX_EFFECT_WORK,
+            #[cfg(test)]
+            live_builds: 0,
             session: None,
             changes: Changes::default(),
         }
@@ -358,8 +384,13 @@ impl<'a, 'b> Runner<'a, 'b> {
         }
     }
 
+    /// Rebuild an invalidated snapshot lazily and record its size for replay-work accounting.
     fn live(&mut self) -> &LiveForm {
         if self.cached.is_none() {
+            #[cfg(test)]
+            {
+                self.live_builds += 1;
+            }
             let live = pdfcraft_xfa::form_tree(self.tpl, self.data.as_ref(), &self.ov);
             if live.truncated && !self.truncated_warned {
                 self.truncated_warned = true;
@@ -368,6 +399,7 @@ impl<'a, 'b> Runner<'a, 'b> {
                     pdfcraft_xfa::MAX_FORM_NODES
                 ));
             }
+            self.cached_nodes = form_nodes(&live.root, 0);
             self.cached = Some(live);
         }
         self.cached.get_or_insert_with(Default::default)
@@ -586,10 +618,25 @@ impl<'a, 'b> Runner<'a, 'b> {
         Ok(())
     }
 
+    /// Charge cumulative host work and the event deadline. Returning an error aborts
+    /// the enclosing engine edit/open transaction; callers must not publish partial state.
+    fn effect_charge(&mut self, work: usize) -> Result<(), String> {
+        if self.clock.spent() {
+            return Err("The XFA event exceeded its time limit while applying script changes".into());
+        }
+        self.effect_work = self.effect_work.checked_sub(work).ok_or("The XFA event exceeded its instance-processing work limit")?;
+        Ok(())
+    }
+
     /// Apply what a script of `ev` did. Returns whether the form has to be laid out again.
+    /// Counts/defaults are cached per manager until a change can invalidate them. A
+    /// removed parent invalidates all descendant managers, including shifted siblings;
+    /// their next use reads the updated tree. Unrelated managers retain their counts.
     fn apply_effects(&mut self, ev: &ScriptEvent, effects: &[XfaEffect]) -> Result<bool, String> {
         let mut relayout = false;
+        let mut instances: HashMap<(String, String), InstanceState> = HashMap::new();
         for e in effects {
+            self.effect_charge(1)?;
             // Only a click script may print, save, open links or move the focus (not the
             // calculations a click sets off, nor anything run on open or on a change).
             if let Some(what) = click_only(e)
@@ -601,9 +648,18 @@ impl<'a, 'b> Runner<'a, 'b> {
             }
             match e {
                 XfaEffect::SetValue { som, value } => {
+                    // Updating a field in an existing data parent cannot change manager
+                    // counts. Keep the cache for the common add-row-then-fill sequence;
+                    // creating missing ancestors requires a fresh structural snapshot.
+                    let path = pdfcraft_xfa::data_path(self.tpl, som);
+                    let parent_exists = path.split_last().is_some_and(|(_, parent)| self.data.as_ref().and_then(|d| d.get(parent)).is_some());
+                    if !parent_exists {
+                        instances.clear();
+                    }
                     self.set_value(som, value);
                 }
                 XfaEffect::SetPresence { som, presence } => {
+                    instances.clear();
                     if self.ov.presence.insert(som.clone(), presence.clone()).as_ref() != Some(presence) {
                         self.ov_dirty = true;
                         self.changes.visibility += 1;
@@ -612,6 +668,7 @@ impl<'a, 'b> Runner<'a, 'b> {
                     }
                 }
                 XfaEffect::SetAccess { som, access } => {
+                    instances.clear();
                     if self.ov.access.insert(som.clone(), access.clone()).as_ref() != Some(access) {
                         self.ov_dirty = true;
                         self.changes.visibility += 1;
@@ -621,31 +678,48 @@ impl<'a, 'b> Runner<'a, 'b> {
                 }
                 XfaEffect::AddInstance { som } | XfaEffect::RemoveInstance { som } => {
                     let Some((parent, parent_som, name, index)) = split_instance(self.tpl, som) else { continue };
-                    let tpl = self.tpl;
-                    let live = self.live();
-                    let have = count_instances(&live.root, &parent_som, &name);
-                    let seeds = if matches!(e, XfaEffect::AddInstance { .. }) {
-                        instance_seeds(tpl, &live.root, &parent_som, &name, som)?
-                    } else {
-                        Vec::new()
-                    };
+                    let key = (parent_som.clone(), name.clone());
+                    if !instances.contains_key(&key) {
+                        self.live();
+                        // Cover both construction and the bounded definition lookup. At
+                        // most one already-bounded snapshot can precede exhaustion.
+                        self.effect_charge(self.cached_nodes.saturating_mul(2))?;
+                        let state = InstanceState::read(&self.live().root, &parent_som, &name)?;
+                        instances.insert(key.clone(), state);
+                    }
+                    let Some(state) = instances.get_mut(&key) else { continue };
+                    let have = state.count;
                     if matches!(e, XfaEffect::AddInstance { .. }) {
-                        self.data_op(pdfcraft_xfa::DataOp::Instances { parent, name, count: (index + 1).max(have + 1) });
-                        for seed in seeds {
-                            self.data_op(seed);
+                        self.effect_charge(state.seeds.len())?;
+                        let count = index.saturating_add(1).max(have.saturating_add(1));
+                        self.data_op(pdfcraft_xfa::DataOp::Instances { parent, name, count });
+                        for suffix in &state.seeds {
+                            let mut path = pdfcraft_xfa::data_path(self.tpl, &format!("{som}{suffix}"));
+                            if let Some((name, index)) = path.pop() {
+                                self.data_op(pdfcraft_xfa::DataOp::Instances { parent: path, name, count: index.saturating_add(1) });
+                            }
                         }
+                        state.count = count;
                     } else {
-                        // The data holds every shown instance before one is taken out.
+                        // Materialize initial rows before removing one; a blank dataset
+                        // does not yet contain every row shown by the template.
                         self.data_op(pdfcraft_xfa::DataOp::Instances { parent: parent.clone(), name: name.clone(), count: have });
                         let mut path = parent;
-                        path.push((name, index));
+                        path.push((name.clone(), index));
                         self.data_op(pdfcraft_xfa::DataOp::Remove(path));
+                        state.count = have.saturating_sub(usize::from(index < have));
+                        self.effect_charge(instances.len())?;
+                        let prefix = if parent_som.is_empty() { format!("{name}[") } else { format!("{parent_som}.{name}[") };
+                        instances.retain(|(p, _), _| !p.starts_with(&prefix));
                     }
                     self.changes.rows += 1;
                     relayout = true;
                 }
                 XfaEffect::MessageBox(m) => self.alert(m.clone()),
-                XfaEffect::ResetData(names) => self.reset(names)?,
+                XfaEffect::ResetData(names) => {
+                    instances.clear();
+                    self.reset(names)?;
+                }
                 XfaEffect::Print => self.run.out.requests.push(Request::Print),
                 XfaEffect::SaveAs => self.run.out.requests.push(Request::SaveAs),
                 XfaEffect::LaunchUrl(u) => self.run.out.requests.push(Request::LaunchUrl(u.clone())),
@@ -659,6 +733,7 @@ impl<'a, 'b> Runner<'a, 'b> {
                 XfaEffect::Relayout => relayout = true,
             }
         }
+        self.effect_charge(0)?;
         Ok(relayout)
     }
 
@@ -881,6 +956,58 @@ pub(crate) fn mark_script_buttons(doc: &pdfcraft_cos::Document, fields: &mut [pd
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A deterministic rebuild count catches amplification without a flaky timing limit.
+    #[test]
+    fn instance_effect_batch_reuses_live_form() {
+        let xml = pdfcraft_xfa::fixtures::optional_rows(0).replace(r#"max="2""#, r#"max="-1""#).replace(
+            "<field name=\"other\"",
+            &format!("<subform name=\"unrelated\">{}</subform><field name=\"other\"", "<field name=\"unused\"/>".repeat(3000)),
+        );
+        for fill in [false, true] {
+            let (tpl, _) = pdfcraft_xfa::parse(&xml).unwrap();
+            let mut doc = pdfcraft_cos::Document::open(Arc::new(pdfcraft_xfa::fixtures::shell(&xml))).unwrap();
+            let mut out = JsOutput::default();
+            let mut run = XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: false };
+            let mut runner = Runner::new(&mut doc, &tpl, &mut run, 60_000);
+            let effects: Vec<_> = (0..200)
+                .flat_map(|i| {
+                    let som = format!("form[0].row[{i}]");
+                    let mut effects = vec![XfaEffect::AddInstance { som: som.clone() }];
+                    if fill {
+                        effects.push(XfaEffect::SetValue { som: format!("{som}.entry[0]"), value: "filled".into() });
+                    }
+                    effects
+                })
+                .collect();
+            let ev = ScriptEvent { som: "form[0].add[0]".into(), activity: "click".into(), script: String::new(), formcalc: false, message: None };
+            let start = std::time::Instant::now();
+            runner.apply_effects(&ev, &effects).unwrap();
+            eprintln!("200 additions (fill={fill}) beside 3000 unrelated fields: {:?}; {} live builds", start.elapsed(), runner.live_builds);
+            assert_eq!(runner.data.as_ref().unwrap().count(&pdfcraft_xfa::som_to_path("form[0]"), "row"), 200);
+            assert_eq!(runner.live_builds, 1, "one batch must not rebuild the unrelated subtree for every row");
+            if fill {
+                assert_eq!(runner.data.as_ref().unwrap().text_at(&pdfcraft_xfa::som_to_path("form[0].row[199].entry[0]")), Some("filled"));
+            }
+        }
+    }
+
+    /// Host replay checks the native event deadline even when no new script starts.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn effect_replay_checks_the_deadline_before_mutating_data() {
+        let xml = pdfcraft_xfa::fixtures::optional_rows(0);
+        let (tpl, _) = pdfcraft_xfa::parse(&xml).unwrap();
+        let mut doc = pdfcraft_cos::Document::open(Arc::new(pdfcraft_xfa::fixtures::shell(&xml))).unwrap();
+        let mut out = JsOutput::default();
+        let mut run = XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: false };
+        let mut runner = Runner::new(&mut doc, &tpl, &mut run, 0);
+        let ev = ScriptEvent { som: "form[0].add[0]".into(), activity: "click".into(), script: String::new(), formcalc: false, message: None };
+        let error = runner.apply_effects(&ev, &[XfaEffect::AddInstance { som: "form[0].row[0]".into() }]).unwrap_err();
+        assert!(error.contains("time limit"));
+        assert!(runner.pending.is_empty());
+        assert_eq!(runner.changes.rows, 0);
+    }
 
     #[test]
     fn script_names_match_indexed_som_paths() {

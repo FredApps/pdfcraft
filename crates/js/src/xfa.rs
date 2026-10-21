@@ -372,10 +372,13 @@ fn host(ctx: &Context) -> JsResult<&Shared> {
     ctx.get_data::<Shared>().ok_or_else(|| error("the XFA script host is not set up"))
 }
 
+/// Import a live root into the bounded host arena; definitions remain separately addressable.
 fn flatten(n: &XfaNode, parent: Option<usize>, out: &mut Vec<HNode>, depth: usize) -> Option<usize> {
     flatten_definition(n, parent, out, depth, false)
 }
 
+/// Flatten a live node or a dormant default, propagating dormancy to descendants.
+/// Refuse nodes past depth or arena limits; earlier imported nodes remain in the arena.
 fn flatten_definition(n: &XfaNode, parent: Option<usize>, out: &mut Vec<HNode>, depth: usize, dormant: bool) -> Option<usize> {
     if depth > MAX_DEPTH || out.len() >= MAX_NODES {
         return None;
@@ -909,6 +912,7 @@ pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize
     out
 }
 
+/// Read an XFA property or live child; underscore managers can resolve even at zero instances.
 fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(&arg(args, 0), ctx)?;
     let key = arg(args, 1);
@@ -1176,6 +1180,7 @@ fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
     resolver(ctx, current, many)
 }
 
+/// Install document-local XFA objects and scoped globals; dormant definitions expose managers only.
 fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) -> JsResult<()> {
     let rw = Attribute::CONFIGURABLE;
     let form = node_object(ctx, 0)?;
@@ -1592,6 +1597,7 @@ pub(crate) fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNo
 mod zero_instance_limits {
     use super::*;
 
+    /// A failed bounded clone must roll back arena allocations and emit no structural effect.
     #[test]
     fn zero_instance_clone_failure_leaves_no_partial_row_or_effect() {
         let row = XfaNode { name: "row".into(), repeatable: true, occur_min: 0, ..Default::default() };

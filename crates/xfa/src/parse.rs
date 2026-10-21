@@ -495,6 +495,7 @@ fn parse_events(n: XmlNode) -> Vec<Script> {
     scripts
 }
 
+/// Read occurrence bounds without imposing a positive floor; omitted max defaults to min.
 fn parse_occur(n: Option<XmlNode>) -> Occur {
     let Some(n) = n else { return Occur::default() };
     let int = |a: &str| n.attribute(a).and_then(|v| v.trim().parse::<i64>().ok());
@@ -544,6 +545,7 @@ fn parse_page_set(n: XmlNode, warnings: &mut Vec<String>, depth: usize) -> PageS
     PageSet { areas }
 }
 
+/// Read subform flow, occurrence, and break properties, including explicit keep-intact constraints.
 fn parse_subform(n: XmlNode, warnings: &mut Vec<String>, depth: usize) -> Subform {
     let common = parse_common(n);
     let mut children_out = Vec::new();

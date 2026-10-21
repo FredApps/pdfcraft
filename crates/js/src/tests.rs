@@ -1138,6 +1138,7 @@ mod xfa_zero_instances {
     use crate::formcalc::run_formcalc;
     use crate::xfa::{XfaDoc, XfaEvent, XfaKind, XfaNode, run_xfa};
 
+    /// Build a manager with a retained default and no live row, capped by the supplied maximum.
     fn form(max: usize) -> XfaNode {
         XfaNode {
             name: "form1".into(),
@@ -1164,6 +1165,7 @@ mod xfa_zero_instances {
         }
     }
 
+    /// JavaScript sees no phantom row but can add, remove, and recreate one within occurrence limits.
     #[test]
     fn javascript_zero_instances_keep_only_the_manager_and_can_recreate_the_last_row() {
         let event = XfaEvent { target: "form1[0].go[0]".into(), activity: "click".into(), ..Default::default() };
@@ -1188,6 +1190,7 @@ mod xfa_zero_instances {
         assert_eq!(out.result.as_deref(), Some("undefined/1/0/0/0/1/0/default/0/1/0/true/default/0/1/0"));
     }
 
+    /// FormCalc manager operations must match JavaScript at zero and at the maximum.
     #[test]
     fn formcalc_zero_instances_share_manager_limits_and_lifecycle() {
         let event = XfaEvent { target: "form1[0].go[0]".into(), activity: "click".into(), ..Default::default() };
@@ -1208,6 +1211,7 @@ mod xfa_zero_instances {
         assert_eq!(out.result.as_deref(), Some("0/0/2/default/0/default/2/0"));
     }
 
+    /// Recreating the last row must not resurrect values edited in its removed predecessor.
     #[test]
     fn zero_instances_readd_after_removing_an_existing_row_does_not_restore_edited_values() {
         let mut root = form(1);
@@ -1225,6 +1229,7 @@ mod xfa_zero_instances {
         assert_eq!(out.error, None, "{out:?}");
         assert_eq!(out.result.as_deref(), Some("1/true"));
     }
+    /// A newly created parent must retain managers for its own absent optional children.
     #[test]
     fn nested_zero_instance_definitions_survive_creating_the_parent() {
         let mut root = form(1);
@@ -1242,6 +1247,7 @@ mod xfa_zero_instances {
         assert_eq!(out.error, None, "{out:?}");
         assert_eq!(out.result.as_deref(), Some("1/0/default/form1[0].row[0].nested[0]"));
     }
+    /// Recreation restores defaults in template order rather than appending after unrelated siblings.
     #[test]
     fn zero_instance_recreation_restores_template_defaults_and_sibling_order() {
         let mut root = form(1);
@@ -1263,6 +1269,7 @@ mod xfa_zero_instances {
         assert_eq!(out.error, None, "{out:?}");
         assert_eq!(out.result.as_deref(), Some("row/default/3"));
     }
+    /// Positive nested defaults remain valid clone sources after removing and recreating the child.
     #[test]
     fn nested_positive_optional_child_keeps_its_default_after_zero_and_recreation() {
         let mut root = form(1);

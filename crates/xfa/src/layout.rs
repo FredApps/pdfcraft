@@ -155,6 +155,7 @@ impl Ctx {
         Ctx { font: self.font.apply(&c.font), para: self.para.apply(&c.para), som: self.som.clone() }
     }
 
+    /// Enter the indexed node scope so descendants resolve data under the correct parent instance.
     fn with_som(&self, c: &Common, index: usize) -> Ctx {
         let mut out = self.child(c);
         if let Some(n) = &c.name {
@@ -803,6 +804,7 @@ impl Layouter<'_> {
         vec![inner_w / cells as f64; cells]
     }
 
+    /// Flow each data row using its own measured height, repeating the configured leader at breaks.
     fn flow_table(&mut self, sf: &Subform, x: f64, inner_w: f64, ctx: &Ctx, depth: usize) -> Result<(), XfaError> {
         let cols = self.columns(sf, inner_w);
         let leader =
@@ -820,13 +822,13 @@ impl Layouter<'_> {
                 let instances = self.instances(child, &ctx.som);
                 self.warn_truncated(child, &ctx.som, instances);
                 for inst in 0..instances {
-                    let h = self.row_height(row, &cols, inner_w, ctx, depth + 1);
+                    let h = self.row_height(row, &cols, inner_w, ctx, depth + 1, csib + inst);
                     if self.make_room(h)?
                         && let Some(li) = leader
                         && li != ci
                         && let Some(Node::Subform(l)) = sf.children.get(li)
                     {
-                        let lh = self.row_height(l, &cols, inner_w, ctx, depth + 1);
+                        let lh = self.row_height(l, &cols, inner_w, ctx, depth + 1, sibs.at(li));
                         let (_, y, _) = self.cursor();
                         self.draw_row(l, &cols, Rect::new(x, y, inner_w, lh), ctx, depth + 1, sibs.at(li))?;
                         self.place(lh);
@@ -883,6 +885,7 @@ impl Layouter<'_> {
         }
     }
 
+    /// Measure within depth/work limits, caching containers only for matching style and parent SOM.
     fn size_of(&self, node: &Node, avail_w: f64, ctx: &Ctx, depth: usize) -> (f64, f64) {
         if self.instances(node, &ctx.som) == 0 {
             return (0.0, 0.0);
@@ -918,6 +921,7 @@ impl Layouter<'_> {
         size
     }
 
+    /// Compute intrinsic geometry; table height sums the heights of its individual data rows.
     fn measure(&self, node: &Node, avail_w: f64, ctx: &Ctx, depth: usize) -> (f64, f64) {
         let c = node.common();
         // The node's own SOM: its repeating children count their instances under it, and a
@@ -959,14 +963,19 @@ impl Layouter<'_> {
                         Layout::LrTb | Layout::RlTb => self.pack_instances(&s.children, inner_w, &ctx, depth, &som).1,
                         Layout::Table => {
                             let cols = self.columns(s, inner_w);
+                            let sibs = SomIndices::of(&s.children);
                             s.children
                                 .iter()
-                                .filter(|k| k.common().presence.occupies() && self.instances(k, &som) > 0)
-                                .map(|k| {
-                                    (match k {
-                                        Node::Subform(r) if r.layout == Layout::Row => self.row_height(r, &cols, inner_w, &ctx, depth + 1),
-                                        _ => self.size_of(k, inner_w, &ctx, depth + 1).1,
-                                    }) * self.instances(k, &som) as f64
+                                .enumerate()
+                                .filter(|(_, k)| k.common().presence.occupies() && self.instances(k, &som) > 0)
+                                .map(|(i, k)| {
+                                    let instances = self.instances(k, &som);
+                                    match k {
+                                        Node::Subform(r) if r.layout == Layout::Row => {
+                                            (0..instances).map(|n| self.row_height(r, &cols, inner_w, &ctx, depth + 1, sibs.at(i) + n)).sum()
+                                        }
+                                        _ => self.size_of(k, inner_w, &ctx, depth + 1).1 * instances as f64,
+                                    }
                                 })
                                 .sum()
                         }
@@ -1179,8 +1188,10 @@ impl Layouter<'_> {
         (out, clamp_opt(h, row.common.min_h, row.common.max_h))
     }
 
-    fn row_height(&self, row: &Subform, cols: &[f64], inner_w: f64, ctx: &Ctx, depth: usize) -> f64 {
-        let ctx = ctx.with_som(&row.common, 0);
+    /// Measure cells in the same instance scope used by `draw_row`: optional cells
+    /// can exist in one data row but not its siblings.
+    fn row_height(&self, row: &Subform, cols: &[f64], inner_w: f64, ctx: &Ctx, depth: usize, index: usize) -> f64 {
+        let ctx = ctx.with_som(&row.common, index);
         self.cells(row, cols, inner_w, &ctx, depth).1
     }
 
@@ -1206,6 +1217,7 @@ impl Layouter<'_> {
         Ok(())
     }
 
+    /// Draw a positioned child at its rectangle; zero instances produce no output.
     fn draw_positioned_child(&mut self, k: &Node, inner: Rect, ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         let c = k.common();
         if !c.presence.occupies() || self.instances(k, &ctx.som) == 0 {
@@ -1216,6 +1228,7 @@ impl Layouter<'_> {
         self.draw_node(k, Rect::new(inner.x + x, inner.y + y, w, h), ctx, depth + 1, sib)
     }
 
+    /// Draw one indexed instance with inherited style, using matching data scopes for child geometry.
     fn draw_node(&mut self, node: &Node, rect: Rect, ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         if depth > MAX_DEPTH {
             return Ok(());
@@ -1300,8 +1313,8 @@ impl Layouter<'_> {
                             if let Node::Subform(r) = k
                                 && r.layout == Layout::Row
                             {
-                                let h = self.row_height(r, &cols, inner.w, &ctx, depth + 1);
                                 for instance in 0..self.instances(k, &ctx.som) {
+                                    let h = self.row_height(r, &cols, inner.w, &ctx, depth + 1, csib + instance);
                                     self.draw_row(r, &cols, Rect::new(inner.x, y, inner.w, h), &ctx, depth + 1, csib + instance)?;
                                     y += h;
                                 }

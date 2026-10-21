@@ -2,6 +2,7 @@
 use pdfcraft_automation::{Automation, Content};
 use serde_json::{Value, json};
 
+/// Call the public automation table and require its JSON result for lifecycle assertions.
 fn tool(a: &mut Automation, name: &str, args: Value) -> Value {
     match a.call(name, &args).unwrap().remove(0) {
         Content::Json(value) => value,
@@ -9,6 +10,7 @@ fn tool(a: &mut Automation, name: &str, args: Value) -> Value {
     }
 }
 
+/// Exercise the zero-row lifecycle through tools, checking rendered pixels as well as persisted values.
 #[test]
 fn zero_instances_tools_render_fill_undo_save_and_reopen() {
     let dir = std::env::temp_dir().join(format!("pdfcraft-xfa-zero-{}", std::process::id()));

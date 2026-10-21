@@ -191,6 +191,7 @@ impl Walker<'_> {
         true
     }
 
+    /// Collect live-instance events within the event cap; dormant defaults must never run scripts.
     fn push_events(&mut self, som: &str, scripts: &[Script], calculate: Option<&Script>, validate: Option<&Script>, message: Option<&str>) {
         if self.template_mode {
             return;
@@ -284,6 +285,8 @@ impl Walker<'_> {
         }
     }
 
+    /// Build live children and detached defaults separately within the shared node/depth budget.
+    /// Nested positive defaults are already clone sources and must not be duplicated exponentially.
     fn children(&mut self, nodes: &[Node], parent_som: &str, depth: usize) -> (Vec<FormNode>, Vec<FormNode>) {
         let mut out = Vec::new();
         let mut templates = Vec::new();
