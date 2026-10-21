@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-20 (M5, text boxes in place):** Text boxes are typed into on the page, as in Acrobat, instead of in a card beside them: the Text box tool's click opens an editor where the box goes, in the box's colour, size and fill at the page's zoom, and a double-click (or Edit text…) on a text box or typewriter text edits it there; clicking away or ⌘/Ctrl+Enter keeps the text, Escape drops it, and Save keeps what is being typed. A box that fits its text keeps fitting it when the text or the font size changes, narrower and shorter too (`appearance::text_box_width` is the one width rule for new and refitted boxes); a box sized by hand keeps its width. Callouts and text on turned pages keep the composer card. Estimates unchanged.
+
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.
