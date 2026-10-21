@@ -16,6 +16,13 @@ fn a_moved_or_reshaped_line_is_drawn_at_its_new_points() {
     let to = Some(pos2(60.0, 10.0));
     assert_eq!(changing_points(Some(&dragging), None, (0, 3), &line, to_user, to, false), Some(vec![[10.0, 10.0], [60.0, 10.0]]));
     assert_eq!(changing_points(None, None, (0, 3), &line, to_user, to, false), None, "not changing");
+    // Released with the rest of the selection: its own move in the batch.
+    let together = Edit::Batch {
+        label: "Move comments".into(),
+        edits: vec![Edit::MoveAnnotation { page: 0, index: 1, dx: 1.0, dy: 1.0 }, Edit::MoveAnnotation { page: 0, index: 3, dx: 5.0, dy: 20.0 }],
+    };
+    assert_eq!(changing_points(None, Some(&together), (0, 3), &line, to_user, None, false), Some(vec![[15.0, 30.0], [55.0, 30.0]]));
+    assert_eq!(changing_points(None, Some(&together), (0, 2), &line, to_user, None, false), None, "not in the batch");
 }
 
 /// A sticky note on a page turned a quarter is drawn upright beside its `/Rect`: an edit

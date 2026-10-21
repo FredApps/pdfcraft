@@ -91,6 +91,11 @@ pub(super) fn changing_points(
         }),
         (_, Some(Edit::ReshapeAnnotation { page: p, index: i, points: to })) if (*p, *i) == (page, index) => Some(to.clone()),
         (_, Some(Edit::MoveAnnotation { page: p, index: i, dx, dy })) if (*p, *i) == (page, index) => Some(shifted(*dx, *dy)),
+        // Moved with the rest of the selection: its own move in the batch.
+        (_, Some(Edit::Batch { edits, .. })) => edits.iter().find_map(|e| match e {
+            Edit::MoveAnnotation { page: p, index: i, dx, dy } if (*p, *i) == (page, index) => Some(shifted(*dx, *dy)),
+            _ => None,
+        }),
         _ => None,
     }
 }
