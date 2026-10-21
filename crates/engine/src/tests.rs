@@ -6277,7 +6277,7 @@ fn xfa_instance_work_exhaustion_preserves_the_document() {
         )
         .replace(
             r#"<field name="other""#,
-            &format!(r#"<subform name="unrelated" presence="hidden">{}</subform><field name="other""#, r#"<field name="unused"/>"#.repeat(3000)),
+            &format!(r#"<subform name="unrelated" presence="hidden">{}</subform><field name="other""#, r#"<field name="unused"/>"#.repeat(6000)),
         );
     let mut s = Session::new().with_clock(|| 1_700_000_000);
     let id = s.open("bounded-batch.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();

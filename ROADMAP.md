@@ -172,6 +172,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- 2026-10-21 — M12 (#3941 follow-up): repeated flowing subforms and growing fields measure their own indexed data; replay charges actual lookup visits and each rebuilt snapshot once; keep-rule notes distinguish the supported horizontal subset.
 - 2026-10-21 — M12 (#3941 review): repeated table rows measure optional cells per instance; instance-effect batches cache counts/defaults with bounded replay and rollback regressions. Documented dormant templates, invalidation rules and occurrence tests.
 
 - 2026-10-21 — M12: optional XFA subforms can have zero instances; retained managers add the first row and remove the last, with occurrence limits, undo/redo and save/reopen regressions. Other XFA fidelity gaps remain.

@@ -159,14 +159,15 @@ fn to_js(n: &FormNode) -> XfaNode {
 }
 
 /// Find a live container by exact indexed SOM, without entering dormant definitions.
-fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize) -> Option<&'a FormNode> {
+fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize, visited: &mut usize) -> Option<&'a FormNode> {
+    *visited = visited.saturating_add(1);
     if depth > 64 {
         return None;
     }
     if n.som == som && n.kind != Some(NodeKind::Field) {
         return Some(n);
     }
-    n.children.iter().find_map(|c| find_container(c, som, depth + 1))
+    n.children.iter().find_map(|c| find_container(c, som, depth + 1, visited))
 }
 
 /// Counts and default descendant SOM suffixes for one manager during an effect batch.
@@ -179,15 +180,26 @@ struct InstanceState {
 impl InstanceState {
     /// Read a manager once from the current tree. Only live descendants of its retained
     /// definition seed data; dormant children must stay absent. Traversal is bounded.
-    fn read(root: &FormNode, parent_som: &str, name: &str) -> Result<Self, String> {
-        let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0) };
-        let count = parent.map_or(0, |p| p.children.iter().filter(|c| c.name == name).count());
+    fn read(root: &FormNode, parent_som: &str, name: &str, work: &mut usize) -> Result<Self, String> {
+        let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0, work) };
+        let count = parent.map_or(0, |p| {
+            *work = work.saturating_add(p.children.len());
+            p.children.iter().filter(|c| c.name == name).count()
+        });
         let mut state = Self { count, seeds: Vec::new() };
-        let Some(source) = parent.and_then(|p| p.instance_templates.iter().find(|n| n.name == name)) else { return Ok(state) };
+        let Some(source) = parent.and_then(|p| {
+            p.instance_templates.iter().find(|n| {
+                *work = work.saturating_add(1);
+                n.name == name
+            })
+        }) else {
+            return Ok(state);
+        };
         let mut pending = source.children.iter().map(|n| (n, 1usize)).collect::<Vec<_>>();
         let mut visited = 0;
         while let Some((node, depth)) = pending.pop() {
             visited += 1;
+            *work = work.saturating_add(1);
             if depth > 64 || visited > pdfcraft_xfa::MAX_FORM_NODES {
                 return Err("The added XFA instance exceeds the supported structure limits".into());
             }
@@ -205,7 +217,8 @@ impl InstanceState {
 }
 
 /// Size of a bounded form snapshot, including definitions retained for managers. This
-/// charges rebuilding and lookup work even when unrelated subtrees contain no fields.
+/// accounts for rebuilding even when unrelated subtrees contain no fields. Manager
+/// lookups count only the nodes they actually visit.
 fn form_nodes(node: &FormNode, depth: usize) -> usize {
     if depth > 64 {
         return pdfcraft_xfa::MAX_FORM_NODES;
@@ -309,8 +322,9 @@ struct Runner<'a, 'b> {
     fields: Option<HashMap<String, FieldInfo>>,
     /// The live form as last built; dropped when a script changed the form.
     cached: Option<LiveForm>,
-    /// Snapshot size, refreshed only when the live form is rebuilt.
-    cached_nodes: usize,
+    /// Rebuilt nodes not yet charged to structural replay. Accumulate across invalidations
+    /// so a snapshot is charged once even if several scripts rebuild before a manager lookup.
+    pending_snapshot_work: usize,
     /// Remaining replay work across all scripts of this event (not reset per batch).
     effect_work: usize,
     #[cfg(test)]
@@ -347,7 +361,7 @@ impl<'a, 'b> Runner<'a, 'b> {
             by_path: None,
             fields: None,
             cached: None,
-            cached_nodes: 0,
+            pending_snapshot_work: 0,
             effect_work: MAX_EFFECT_WORK,
             #[cfg(test)]
             live_builds: 0,
@@ -399,7 +413,7 @@ impl<'a, 'b> Runner<'a, 'b> {
                     pdfcraft_xfa::MAX_FORM_NODES
                 ));
             }
-            self.cached_nodes = form_nodes(&live.root, 0);
+            self.pending_snapshot_work = self.pending_snapshot_work.saturating_add(form_nodes(&live.root, 0));
             self.cached = Some(live);
         }
         self.cached.get_or_insert_with(Default::default)
@@ -681,10 +695,13 @@ impl<'a, 'b> Runner<'a, 'b> {
                     let key = (parent_som.clone(), name.clone());
                     if !instances.contains_key(&key) {
                         self.live();
-                        // Cover both construction and the bounded definition lookup. At
-                        // most one already-bounded snapshot can precede exhaustion.
-                        self.effect_charge(self.cached_nodes.saturating_mul(2))?;
-                        let state = InstanceState::read(&self.live().root, &parent_som, &name)?;
+                        // Charge rebuilt snapshots once, then only the nodes visited by
+                        // this lookup. Each snapshot and lookup is independently bounded.
+                        let rebuilt = std::mem::take(&mut self.pending_snapshot_work);
+                        self.effect_charge(rebuilt)?;
+                        let mut lookup_work = 0;
+                        let state = InstanceState::read(&self.live().root, &parent_som, &name, &mut lookup_work)?;
+                        self.effect_charge(lookup_work)?;
                         instances.insert(key.clone(), state);
                     }
                     let Some(state) = instances.get_mut(&key) else { continue };
@@ -990,6 +1007,30 @@ mod tests {
                 assert_eq!(runner.data.as_ref().unwrap().text_at(&pdfcraft_xfa::som_to_path("form[0].row[199].entry[0]")), Some("filled"));
             }
         }
+    }
+
+    /// Many small scripts can consult the same manager in a large document without
+    /// paying twice for every unrelated node. A reduced budget keeps the fixture small.
+    #[test]
+    fn instance_work_counts_rebuilds_once_across_script_batches() {
+        let xml = pdfcraft_xfa::fixtures::optional_rows(0).replace(r#"max="2""#, r#"max="-1""#).replace(
+            "<field name=\"other\"",
+            &format!("<subform name=\"unrelated\">{}</subform><field name=\"other\"", "<field name=\"unused\"/>".repeat(3000)),
+        );
+        let (tpl, _) = pdfcraft_xfa::parse(&xml).unwrap();
+        let mut doc = pdfcraft_cos::Document::open(Arc::new(pdfcraft_xfa::fixtures::shell(&xml))).unwrap();
+        let mut out = JsOutput::default();
+        let mut run = XfaRun { page_count: 1, out: &mut out, datasets: None, ran_away: false };
+        let mut runner = Runner::new(&mut doc, &tpl, &mut run, 60_000);
+        runner.effect_work = 40_000;
+        runner.live(); // A script obtains its snapshot before replaying its effects.
+        let ev = ScriptEvent { som: "form[0].add[0]".into(), activity: "click".into(), script: String::new(), formcalc: false, message: None };
+        for i in 0..12 {
+            runner.apply_effects(&ev, &[XfaEffect::AddInstance { som: format!("form[0].row[{i}]") }]).unwrap();
+        }
+        assert_eq!(runner.data.as_ref().unwrap().count(&pdfcraft_xfa::som_to_path("form[0]"), "row"), 12);
+        assert_eq!(runner.live_builds, 12);
+        assert!(runner.effect_work < 4000, "rebuilding must still consume the cumulative budget");
     }
 
     /// Host replay checks the native event deadline even when no new script starts.

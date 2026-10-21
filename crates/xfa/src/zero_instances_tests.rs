@@ -238,3 +238,106 @@ fn optional_table_cells_paginate_with_repeated_headers() {
         assert!(fields[1].rect.bottom() <= 80.01);
     }
 }
+
+/// Each repeated non-row container measures its own optional children, including
+/// both data orders, nested parents, fixed drawing boxes and horizontal packing.
+#[test]
+fn repeated_flowing_subforms_measure_their_own_instances() {
+    for outer in ["tb", "table", "lr-tb", "rl-tb"] {
+        for mode in ["tb", "lr-tb", "rl-tb"] {
+            for height in ["", " h=\"120pt\""] {
+                for rows in ["<row/><row><opt/></row>", "<row><opt/></row><row/>"] {
+                    let body = format!(
+                        r#"
+                    <subform name="parent" layout="tb" w="300pt"><occur min="0" max="-1"/>
+                        <subform name="box" layout="{outer}" w="300pt"{height}>
+                            <subform name="row" layout="{mode}" w="300pt"><occur min="0" max="-1"/>
+                                <subform name="opt" layout="tb" w="300pt"><occur min="0" initial="0" max="1"/>
+                                    <field name="value" w="300pt" h="30pt"><ui><textEdit/></ui></field>
+                                </subform>
+                                <field name="tail" w="300pt" h="10pt"><ui><textEdit/></ui></field>
+                            </subform>
+                        </subform>
+                        <field name="after" w="300pt" h="10pt"><ui><textEdit/></ui></field>
+                    </subform>"#
+                    );
+                    let reverse = if rows.starts_with("<row/>") { "<row><opt/></row><row/>" } else { "<row/><row><opt/></row>" };
+                    let data = format!("<form><parent><box>{rows}</box></parent><parent><box>{reverse}</box></parent></form>");
+                    let form = render(&body, Some(&data));
+                    let fields = widgets(&form);
+                    assert_eq!(fields.len(), 8);
+                    for parent in 0..2 {
+                        let scoped: Vec<_> = fields.iter().filter(|f| f.som.contains(&format!("parent[{parent}]"))).collect();
+                        let tails: Vec<_> = scoped.iter().filter(|f| f.som.ends_with("tail[0]")).collect();
+                        let value = scoped.iter().find(|f| f.som.ends_with("value[0]")).unwrap();
+                        let after = scoped.iter().find(|f| f.som.ends_with("after[0]")).unwrap();
+                        let present = usize::from(value.som.contains("row[1]"));
+                        let start = if present == 0 { value.rect.y } else { tails[0].rect.y };
+                        assert!(
+                            (tails[0].rect.y - start - if present == 0 { 30.0 } else { 0.0 }).abs() < 0.01,
+                            "{outer}/{mode}/{height}/{rows}: {scoped:?}"
+                        );
+                        assert!((tails[1].rect.y - start - 40.0).abs() < 0.01, "{outer}/{mode}/{height}/{rows}: {scoped:?}");
+                        assert!(
+                            (after.rect.y - start - if height.is_empty() { 50.0 } else { 120.0 }).abs() < 0.01,
+                            "{outer}/{mode}/{height}/{rows}: {scoped:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A later, taller horizontal instance must reserve its actual height at a page break.
+#[test]
+fn repeated_horizontal_subforms_paginate_by_instance_height() {
+    for mode in ["lr-tb", "rl-tb"] {
+        let body = format!(
+            r#"<pageSet><pageArea name="body">
+            <contentArea x="10pt" y="10pt" w="300pt" h="60pt"/>
+            <medium short="320pt" long="80pt"/>
+            </pageArea></pageSet>
+            <subform name="row" layout="{mode}" w="300pt"><occur min="0" max="-1"/>
+                <keep intact="contentArea"/>
+                <subform name="opt" layout="tb" w="300pt"><occur min="0" initial="0" max="1"/>
+                    <field name="value" w="300pt" h="40pt"><ui><textEdit/></ui></field>
+                </subform>
+                <field name="tail" w="300pt" h="20pt"><ui><textEdit/></ui></field>
+            </subform>"#
+        );
+        let form = render(&body, Some("<form><row/><row><opt/></row></form>"));
+        assert_eq!(form.pages.len(), 2, "{mode}");
+        let fields = widgets(&form);
+        assert_eq!(fields.len(), 3);
+        assert!((fields[1].rect.y - 10.0).abs() < 0.01);
+        assert!((fields[2].rect.y - 50.0).abs() < 0.01);
+        assert!(fields.iter().all(|f| f.rect.bottom() <= 70.01));
+    }
+}
+
+/// Same-named fields use their own data for growth, even under a positioned parent.
+#[test]
+fn same_named_growing_fields_measure_their_own_values() {
+    for parent in ["tb", "position"] {
+        let body = format!(
+            r#"<subform name="box" layout="{parent}" w="300pt">
+            <subform name="content" layout="tb" w="100pt">
+                <field name="text" w="100pt"><ui><textEdit multiLine="1"/></ui></field>
+                <field name="text" w="100pt"><ui><textEdit multiLine="1"/></ui></field>
+                <field name="after" w="100pt" h="10pt"><ui><textEdit/></ui></field>
+            </subform></subform>"#
+        );
+        let form = render(
+            &body,
+            Some(
+                "<form><box><content><text>short</text><text>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen</text></content></box></form>",
+            ),
+        );
+        let fields = widgets(&form);
+        assert_eq!(fields.len(), 3);
+        assert!(fields[1].rect.h > fields[0].rect.h + 15.0, "{parent}: {fields:?}");
+        assert!((fields[1].rect.y - fields[0].rect.bottom()).abs() < 0.01);
+        assert!((fields[2].rect.y - fields[1].rect.bottom()).abs() < 0.01);
+    }
+}

@@ -26,8 +26,10 @@ the automation tools) works on it unchanged. The engine does this when it opens 
   instances, including zero for optional subforms. Absent instances occupy no space and do not
   trigger page breaks. This applies in flowed content and in a top-to-bottom container inside
   positioned content (a table in an area) alike. Intrinsic horizontal flow can split across
-  pages after a row is removed; explicit `keep intact` keeps such a section together when
-  it fits in a fresh area. Fields that compute the page number or count on layout show the numbers.
+  pages after a row is removed; explicit `keep intact="contentArea"` or `keep intact="pageArea"`
+  keeps such a section together when it fits in a fresh area. Repeated containers measure each
+  instance in its own data scope, including optional children and growing text fields.
+  Fields that compute the page number or count on layout show the numbers.
 - **PDF** (`pdf::write_form`): pages with content streams in the standard 14 fonts (Arial and
   friends → Helvetica, Courier New → Courier, serif faces → Times; nothing is embedded), JPEG
   XObjects, and widgets: text (multi-line, max length, alignment), date (Acrobat's `AFDate`
@@ -126,7 +128,9 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   assumptions. Filling a field under an existing data parent keeps the cache. Repeated additions to one
   unchanged manager do not rebuild unrelated form subtrees. Native replay checks the event
   deadline, and native/WASM replay share a cumulative 2,000,000-unit work budget per event
-  (snapshot construction/lookup size, invalidation scans, and descendant data operations).
+  (each snapshot construction once, actual manager-lookup node visits, invalidation scans,
+  and descendant data operations). Charges accumulate across script batches without charging
+  an already-built snapshot again.
   Exceeding either limit returns an error: the engine discards the working edit/open-script
   transaction and keeps the prior document, rather than publishing partial data or geometry.
   This bounds replay amplification; it is not a general JavaScript allocation budget.
@@ -158,7 +162,7 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   file's data is held as a tree and written with the packet's own namespace prefix, never as
   the file's markup, and every rewrite of the packet is parsed back before it is written; the
   engine then lays a dynamic form out again from it and runs its calculations.
-- Missing: `keep` constraints, `subformSet` relations, `rl-tb` is mirrored `lr-tb`, font
+- Missing: broader `keep` constraints (including `next`/`previous` and other layout modes), `subformSet` relations, `rl-tb` is mirrored `lr-tb`, font
   metrics are the approximate Helvetica ones, and line heights are 1.15 × size.
 - Acrobat cannot be an oracle here (clean-room rules): layout follows the specification, and
   fidelity has been checked by eye on real government forms, not pixel-compared.
