@@ -14,8 +14,8 @@ use std::rc::Rc;
 
 use crate::Limits;
 use crate::xfa::{
-    HNode, XHost, XfaDoc, XfaEffect, XfaEvent, XfaKind, XfaNode, XfaOutcome, child_named, clip, clip_result, descendants_named, instances,
-    resolve_som, run_within,
+    HNode, XHost, XfaDoc, XfaEffect, XfaEvent, XfaKind, XfaNode, XfaOutcome, clip, clip_result, descendants_named, instance_source, instances,
+    resolve_manager, resolve_som, run_within,
 };
 
 /// Deepest nesting the parser follows.
@@ -990,9 +990,7 @@ impl Interp<'_> {
             _ => {
                 if let Some(child) = name.strip_prefix('_') {
                     // The instance manager of `child`, looked for like a name.
-                    let found = resolve_som(self.h, self.h.current, child);
-                    let Some(&first) = found.first() else { return Err(format!("unknown instance manager _{child}")) };
-                    let parent = self.node(first).and_then(|n| n.parent).ok_or_else(|| format!("unknown instance manager _{child}"))?;
+                    let (parent, _) = resolve_manager(self.h, self.h.current, name).ok_or_else(|| format!("unknown instance manager _{child}"))?;
                     return Ok(Val::Im(parent, child.to_string()));
                 }
                 let found = resolve_som(self.h, self.h.current, name);
@@ -1070,9 +1068,9 @@ impl Interp<'_> {
             }),
             Val::Im(parent, child) => Ok(match name.to_ascii_lowercase().as_str() {
                 "count" => Val::Num(instances(self.h, parent, &child).len() as f64),
-                "min" => Val::Num(instances(self.h, parent, &child).first().and_then(|i| self.node(*i)).map_or(0.0, |n| n.occur_min as f64)),
+                "min" => Val::Num(instance_source(self.h, parent, &child).and_then(|i| self.h.nodes.get(i)).map_or(0.0, |n| n.occur_min as f64)),
                 "max" => Val::Num(
-                    instances(self.h, parent, &child).first().and_then(|i| self.node(*i)).and_then(|n| n.occur_max).map_or(-1.0, |m| m as f64),
+                    instance_source(self.h, parent, &child).and_then(|i| self.h.nodes.get(i)).and_then(|n| n.occur_max).map_or(-1.0, |m| m as f64),
                 ),
                 "classname" => Val::Str("instanceManager".into()),
                 _ => Val::Sink,
@@ -1125,7 +1123,7 @@ impl Interp<'_> {
             | "calculate" | "traversal" | "extras" | "desc" => Val::Sink,
             other => {
                 if let Some(child) = other.strip_prefix('_') {
-                    return Ok(if child_named(self.h, i, child).is_some() { Val::Im(i, child.to_string()) } else { Val::Null });
+                    return Ok(if instance_source(self.h, i, child).is_some() { Val::Im(i, child.to_string()) } else { Val::Null });
                 }
                 let found = instances(self.h, i, other);
                 match found.as_slice() {
@@ -1509,6 +1507,11 @@ impl Interp<'_> {
             Val::Xfa => match m.as_str() {
                 "resolvenode" | "resolvenodes" => {
                     let s = self.arg_str(args, 0)?;
+                    if m == "resolvenode"
+                        && let Some((p, n)) = resolve_manager(self.h, self.h.current, &s)
+                    {
+                        return Ok(Val::Im(p, n));
+                    }
                     let found = resolve_som(self.h, self.h.current, &s);
                     Ok(self.set_val(found, m == "resolvenodes"))
                 }
@@ -1525,6 +1528,11 @@ impl Interp<'_> {
             Val::Node(i) => match m.as_str() {
                 "resolvenode" | "resolvenodes" => {
                     let s = self.arg_str(args, 0)?;
+                    if m == "resolvenode"
+                        && let Some((p, n)) = resolve_manager(self.h, i, &s)
+                    {
+                        return Ok(Val::Im(p, n));
+                    }
                     let found = resolve_som(self.h, i, &s);
                     Ok(self.set_val(found, m == "resolvenodes"))
                 }
@@ -1630,7 +1638,7 @@ impl Interp<'_> {
                     other => {
                         // `page1.qty = 7`: the child object named by the last step takes the value.
                         if let Some(child) = other.strip_prefix('_') {
-                            if child_named(self.h, i, child).is_some() {
+                            if instance_source(self.h, i, child).is_some() {
                                 return self.assign_to(Val::Im(i, child.to_string()), "count", v);
                             }
                             return Ok(());

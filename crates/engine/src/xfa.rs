@@ -148,7 +148,9 @@ fn to_js(n: &FormNode) -> XfaNode {
         occur_min: n.occur_min,
         occur_max: n.occur_max,
         index: n.index,
+        template_order: n.template_order,
         children: n.children.iter().map(to_js).collect(),
+        instance_templates: n.instance_templates.iter().map(to_js).collect(),
     }
 }
 
@@ -165,6 +167,35 @@ fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize) -> Option<&'a Fo
 fn count_instances(root: &FormNode, parent_som: &str, name: &str) -> usize {
     let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0) };
     parent.map_or(0, |p| p.children.iter().filter(|c| c.name == name).count())
+}
+
+/// Preserve the live descendant structure of a newly instantiated optional template.
+/// Empty subforms need records too: otherwise the next data merge interprets them as
+/// zero instances. Dormant definitions are deliberately not visited.
+fn instance_seeds(tpl: &Template, root: &FormNode, parent_som: &str, name: &str, som: &str) -> Result<Vec<pdfcraft_xfa::DataOp>, String> {
+    let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0) };
+    let Some(source) = parent.and_then(|p| p.instance_templates.iter().find(|n| n.name == name)) else { return Ok(Vec::new()) };
+    let mut pending = source.children.iter().map(|n| (n, 1usize)).collect::<Vec<_>>();
+    let mut ops = Vec::new();
+    let mut visited = 0;
+    while let Some((node, depth)) = pending.pop() {
+        visited += 1;
+        if depth > 64 || visited > pdfcraft_xfa::MAX_FORM_NODES {
+            return Err("The added XFA instance exceeds the supported structure limits".into());
+        }
+        if node.kind == Some(NodeKind::Subform)
+            && !node.name.is_empty()
+            && node.name != "#subform"
+            && let Some(suffix) = node.som.strip_prefix(&source.som)
+        {
+            let mut path = pdfcraft_xfa::data_path(tpl, &format!("{som}{suffix}"));
+            if let Some((name, index)) = path.pop() {
+                ops.push(pdfcraft_xfa::DataOp::Instances { parent: path, name, count: index.saturating_add(1) });
+            }
+        }
+        pending.extend(node.children.iter().map(|n| (n, depth + 1)));
+    }
+    Ok(ops)
 }
 
 /// An instance SOM (`…table[0].row[2]`) split into its parent's data path (areas left out,
@@ -558,21 +589,6 @@ impl<'a, 'b> Runner<'a, 'b> {
     /// Apply what a script of `ev` did. Returns whether the form has to be laid out again.
     fn apply_effects(&mut self, ev: &ScriptEvent, effects: &[XfaEffect]) -> Result<bool, String> {
         let mut relayout = false;
-        // Instances of each repeating subform before the script ran, as the effects leave them.
-        let mut counts: HashMap<(String, String), usize> = HashMap::new();
-        {
-            // A copy of the shared reference: `live()` borrows `self` mutably.
-            let tpl = self.tpl;
-            let live = self.live();
-            for e in effects {
-                if let XfaEffect::AddInstance { som } | XfaEffect::RemoveInstance { som } = e
-                    && let Some((_, parent_som, name, _)) = split_instance(tpl, som)
-                {
-                    let have = count_instances(&live.root, &parent_som, &name);
-                    counts.entry((parent_som, name)).or_insert(have);
-                }
-            }
-        }
         for e in effects {
             // Only a click script may print, save, open links or move the focus (not the
             // calculations a click sets off, nor anything run on open or on a change).
@@ -605,14 +621,21 @@ impl<'a, 'b> Runner<'a, 'b> {
                 }
                 XfaEffect::AddInstance { som } | XfaEffect::RemoveInstance { som } => {
                     let Some((parent, parent_som, name, index)) = split_instance(self.tpl, som) else { continue };
-                    let key = (parent_som, name.clone());
-                    let have = counts.get(&key).copied().unwrap_or(0);
+                    let tpl = self.tpl;
+                    let live = self.live();
+                    let have = count_instances(&live.root, &parent_som, &name);
+                    let seeds = if matches!(e, XfaEffect::AddInstance { .. }) {
+                        instance_seeds(tpl, &live.root, &parent_som, &name, som)?
+                    } else {
+                        Vec::new()
+                    };
                     if matches!(e, XfaEffect::AddInstance { .. }) {
-                        counts.insert(key, have + 1);
                         self.data_op(pdfcraft_xfa::DataOp::Instances { parent, name, count: (index + 1).max(have + 1) });
+                        for seed in seeds {
+                            self.data_op(seed);
+                        }
                     } else {
                         // The data holds every shown instance before one is taken out.
-                        counts.insert(key, have.saturating_sub(1));
                         self.data_op(pdfcraft_xfa::DataOp::Instances { parent: parent.clone(), name: name.clone(), count: have });
                         let mut path = parent;
                         path.push((name, index));

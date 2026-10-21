@@ -23,8 +23,11 @@ the automation tools) works on it unchanged. The engine does this when it opens 
   container without a width is as wide as its content; flow across content areas and pages with
   page masters chosen by occurrence; a table's header row repeats after a break; presence
   `hidden` takes no space, `invisible` takes space; repeating subforms get their initial
-  instances, in flowed content and in a top-to-bottom container inside positioned content (a
-  table in an area) alike; fields that compute the page number or count on layout show the numbers.
+  instances, including zero for optional subforms. Absent instances occupy no space and do not
+  trigger page breaks. This applies in flowed content and in a top-to-bottom container inside
+  positioned content (a table in an area) alike. Intrinsic horizontal flow can split across
+  pages after a row is removed; explicit `keep intact` keeps such a section together when
+  it fits in a fresh area. Fields that compute the page number or count on layout show the numbers.
 - **PDF** (`pdf::write_form`): pages with content streams in the standard 14 fonts (Arial and
   friends → Helvetica, Courier New → Courier, serif faces → Times; nothing is embedded), JPEG
   XObjects, and widgets: text (multi-line, max length, alignment), date (Acrobat's `AFDate`
@@ -95,8 +98,13 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   (reads give a sink that accepts writes), `execEvent`, or the change event per keystroke.
   Validate failures show their message and keep the value, as Acrobat does for scripts.
   A hidden instance of a repeating subform hides every instance (overrides apply to the template).
-  A repeating subform shows what its data holds once the data holds any instance, else its
-  `initial` count, and never fewer than one (`occur min="0"` still shows one row).
+  Occurrence counts follow XFA 3.3 chapter 7, “Repeating Elements using Occurrence Limits”:
+  blank forms use `initial`; data merges use the number of matching data nodes constrained by
+  `min` and `max`. With `min="0"`, no matching data means no instance. A detached template
+  keeps the instance manager available at zero without exposing phantom fields or running
+  their scripts. JavaScript and FormCalc can add the first instance, remove the last, and
+  re-add it; minimum and maximum constraints still apply. This covers the default binding
+  model; explicit/global/unbound binding semantics remain part of the data-binding gap above.
 - **Script limits.** Forms run their scripts on open without being asked, so the engine bounds
   each event: a script's effects (values set again on the same object merge, the last wins;
   10 000 effects, 100 message boxes, 1 000 console lines per script and per event), its loop

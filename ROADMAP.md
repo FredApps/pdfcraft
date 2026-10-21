@@ -172,6 +172,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- 2026-10-21 — M12: optional XFA subforms can have zero instances; retained managers add the first row and remove the last, with occurrence limits, undo/redo and save/reopen regressions. Other XFA fidelity gaps remain.
 - **2026-10-19 (M6, renames keep formulas):** Renaming a field renames it in every calculation that reads it, in the same undo step: `AFSimple_Calculate` field lists, simplified field notation (the comment and the JavaScript after it) and `getField` calls naming it in one string literal; the rest of each script is kept as written. A sum used to drop the renamed field, notation read it as 0 and a script kept a stale value. Field Properties says how many formulas changed and `form_set_props` lists them as `formulas_updated`. Names built at run time and other events' scripts are not rewritten. Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.

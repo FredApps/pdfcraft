@@ -6106,3 +6106,122 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
+
+/// XFA 3.3 chapter 7: an optional subform can have no instances. Its manager must
+/// still create the first instance, and a deleted last row must not return on reopen.
+#[test]
+fn xfa_zero_instances_add_remove_undo_and_reopen() {
+    let tpl = pdfcraft_xfa::fixtures::scripted_template()
+        .replace(r#"<occur min="1" max="-1"/>"#, r#"<occur min="0" initial="0" max="2"/>"#)
+        .replace("if (table._row.count > 1)", "if (table._row.count > 0)");
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("optional.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+    let rows = |s: &Session, id| s.get(id).unwrap().form.iter().filter(|f| f.name == "item" || f.name.starts_with("item_")).count();
+    let click = |s: &mut Session, id, button| {
+        let out = s.run_javascript(id, "", Some(button)).unwrap();
+        assert_eq!(out.error, None, "{out:?}");
+        assert!(s.take_js_output(id).errors.is_empty());
+    };
+    assert_eq!(rows(&s, id), 0, "optional rows must not appear on open");
+    click(&mut s, id, "addRow");
+    assert_eq!(rows(&s, id), 1, "the manager survives without an instance");
+    s.apply(id, Edit::SetFieldValue { name: "item".into(), value: FieldValue::Text("kept by undo".into()) }).unwrap();
+    click(&mut s, id, "removeRow");
+    assert_eq!(rows(&s, id), 0, "the last optional row is removable");
+    s.undo(id).unwrap();
+    assert_eq!(rows(&s, id), 1);
+    assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "item").unwrap().value, vec!["kept by undo"]);
+    s.redo(id).unwrap();
+    assert_eq!(rows(&s, id), 0);
+    let bytes = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(bytes.clone()).unwrap();
+    let data = pdfcraft_xfa::data_of(&cos).unwrap();
+    assert_eq!(data.count(&pdfcraft_xfa::som_to_path("form1[0].page1[0].table[0]"), "row"), 0);
+    let reopened = s.open("optional-again.pdf", None, bytes, None).unwrap();
+    assert_eq!(rows(&s, reopened), 0);
+    click(&mut s, reopened, "addRow");
+    assert_eq!(rows(&s, reopened), 1);
+    click(&mut s, reopened, "addRow");
+    click(&mut s, reopened, "addRow");
+    assert_eq!(rows(&s, reopened), 2, "the maximum still applies");
+}
+
+#[test]
+fn xfa_zero_instances_stay_zero_after_removing_initial_rows_and_reopening() {
+    for initial in [0, 1, 2] {
+        let mut s = Session::new();
+        let id =
+            s.open("optional.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::optional_rows(initial))), None).unwrap();
+        let rows = |s: &Session, id| s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("entry")).count();
+        assert_eq!(rows(&s, id), initial);
+        // First transition from a blank form to data must preserve other initial rows.
+        s.apply(id, Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("outside the rows".into()) }).unwrap();
+        assert_eq!(rows(&s, id), initial);
+        let bytes = s.save_bytes(id).unwrap();
+        let id = s.open("before-remove.pdf", None, bytes, None).unwrap();
+        for _ in 0..initial {
+            assert_eq!(s.run_javascript(id, "", Some("remove")).unwrap().error, None);
+        }
+        assert_eq!(rows(&s, id), 0);
+        let bytes = s.save_bytes(id).unwrap();
+        // Reopen through fresh XFA layout too, rather than trusting cached generated widgets.
+        let mut cos = pdfcraft_cos::Document::open(bytes.clone()).unwrap();
+        let template = pdfcraft_xfa::template_of(&cos).unwrap();
+        let report = pdfcraft_xfa::rerender(&mut cos, &template).unwrap();
+        assert_eq!(report.fields, 3);
+        let id = s.open("after-remove.pdf", None, bytes, None).unwrap();
+        assert_eq!(rows(&s, id), 0);
+        assert_eq!(s.run_javascript(id, "", Some("add")).unwrap().error, None);
+        assert_eq!(rows(&s, id), 1);
+        assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "entry").unwrap().value, vec!["default"]);
+    }
+}
+
+#[test]
+fn xfa_zero_instances_blank_initial_rows_survive_first_edit() {
+    let tpl = pdfcraft_xfa::fixtures::optional_rows(2).replace("<value><text>default</text></value>", "");
+    let mut s = Session::new();
+    let id = s.open("initial-blank.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("first data".into()) }).unwrap();
+    let mut cos = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    let template = pdfcraft_xfa::template_of(&cos).unwrap();
+    let report = pdfcraft_xfa::rerender(&mut cos, &template).unwrap();
+    assert_eq!(report.fields, 5, "creating the first dataset must not erase empty initial rows");
+}
+
+#[test]
+fn xfa_zero_instances_added_parent_preserves_nested_initial_instances() {
+    for nested_initial in [0, 1] {
+        let tpl = pdfcraft_xfa::fixtures::optional_rows(0)
+            .replace(r#"<field name="entry""#, r#"<subform name="inner" layout="tb"><occur min="0" initial="1" max="2"/><field name="entry""#)
+            .replace("</value></field>", "</value></field><subform name=\"empty\"><occur min=\"0\" initial=\"2\" max=\"2\"/></subform></subform>");
+        let tpl = if nested_initial == 0 {
+            tpl.replace(r#"initial="1""#, r#"initial="0""#).replace("_row.addInstance(1);", "_row.addInstance(1)._inner.addInstance(1);")
+        } else {
+            tpl
+        };
+        let mut s = Session::new();
+        let id = s.open("nested-optional.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+        let entries = |s: &Session, id| s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("entry")).count();
+        assert_eq!(entries(&s, id), 0);
+        assert_eq!(s.run_javascript(id, "", Some("add")).unwrap().error, None);
+        assert_eq!(entries(&s, id), 1, "adding the parent must retain its nested initial instance");
+        assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "entry").unwrap().value, vec!["default"]);
+        let bytes = s.save_bytes(id).unwrap();
+        let cos = pdfcraft_cos::Document::open(bytes.clone()).unwrap();
+        let data = pdfcraft_xfa::data_of(&cos).unwrap();
+        let parent = pdfcraft_xfa::som_to_path("form[0].row[0]");
+        assert_eq!(data.count(&parent, "inner"), 1);
+        assert_eq!(data.count(&pdfcraft_xfa::som_to_path("form[0].row[0].inner[0]"), "empty"), 2, "empty nested instances also persist");
+        let reopened = s.open("nested-reopened.pdf", None, bytes, None).unwrap();
+        assert_eq!(entries(&s, reopened), 1);
+        assert_eq!(s.run_javascript(id, "", Some("remove")).unwrap().error, None);
+        assert_eq!(entries(&s, id), 0);
+        assert_eq!(s.run_javascript(id, "", Some("add")).unwrap().error, None);
+        assert_eq!(entries(&s, id), 1);
+        s.undo(id).unwrap();
+        assert_eq!(entries(&s, id), 0);
+        s.redo(id).unwrap();
+        assert_eq!(entries(&s, id), 1);
+    }
+}

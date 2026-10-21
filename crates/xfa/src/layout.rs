@@ -174,6 +174,7 @@ type MeasureKey = (usize, u64, usize);
 struct Measured {
     font: Font,
     para: Para,
+    parent_som: String,
     size: (f64, f64),
 }
 
@@ -213,12 +214,10 @@ struct Layouter<'t> {
     leaves: Vec<(usize, usize, f64, f64)>,
 }
 
-/// How many instances of a repeating subform to lay out: what the data holds once it holds
-/// any (rows added or removed), else the template's initial count; never below one, never
-/// above the maximum.
-pub fn instance_count(occur: &Occur, from_data: usize) -> usize {
-    let n = if from_data > 0 { from_data } else { occur.initial };
-    n.min(occur.max.unwrap_or(usize::MAX)).clamp(1, MAX_INSTANCES)
+/// XFA 3.3 §7, “Repeating Elements using Occurrence Limits”: `initial` applies to a blank
+/// merge (`None`); a data merge uses its matching records, including zero, and `min`/`max`.
+pub fn instance_count(occur: &Occur, from_data: Option<usize>) -> usize {
+    from_data.unwrap_or(occur.initial).max(occur.min).min(occur.max.unwrap_or(usize::MAX)).min(MAX_INSTANCES)
 }
 
 /// Lay a template out, with the values and repeat counts of `data` (the `xfa:data` element).
@@ -587,12 +586,16 @@ impl Layouter<'_> {
         Ok(true)
     }
 
-    /// Place `node` as one block of size (`w`, `h`) at the cursor: in this content area when it fits,
-    /// in the next when it fits there, and across as many as it takes when it is taller than a
-    /// content area (a positioned or fixed-height subform holding more than a page).
+    /// Place `node` at the cursor, splitting an intrinsic horizontal flow between its leaves.
+    /// Other blocks move to the next area when they fit there; oversized blocks are split.
     fn flow_block(&mut self, node: &Node, x: f64, (w, h): (f64, f64), ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         let (rect, y, _) = self.cursor();
-        if y + h > rect.bottom() + 0.01 && h <= rect.h + 0.01 {
+        // Removing the final optional row can shrink a flowing section from taller than a
+        // page to shorter than one. That must not suddenly make the section indivisible and
+        // discard the space left on this page. split_block keeps its fields and text whole.
+        let horizontal_flow = matches!(node, Node::Subform(s)
+            if matches!(s.layout, Layout::LrTb | Layout::RlTb) && s.common.h.is_none() && !s.keep_intact);
+        if !horizontal_flow && y + h > rect.bottom() + 0.01 && h <= rect.h + 0.01 {
             self.make_room(h)?;
         }
         let (rect, y, _) = self.cursor();
@@ -737,12 +740,15 @@ impl Layouter<'_> {
         }
         let Node::Subform(sf) = node else { return Ok(()) };
         self.check_measures()?;
+        let instances = self.instances(node, &ctx.som);
+        self.warn_truncated(node, &ctx.som, instances);
+        if instances == 0 {
+            return Ok(());
+        }
         if sf.break_before_page && self.page_has_flow() {
             self.new_page()?;
         }
         // Data adds instances of a repeating subform (rows added in another viewer).
-        let instances = self.instances(node, &ctx.som);
-        self.warn_truncated(node, &ctx.som, instances);
         let ctx_parent = ctx;
         for i in 0..instances {
             let ctx = ctx_parent.with_som(&sf.common, sib + i);
@@ -764,7 +770,7 @@ impl Layouter<'_> {
                 _ => {
                     let sibs = SomIndices::of(&sf.children);
                     for (ci, child) in sf.children.iter().enumerate() {
-                        if !child.common().presence.occupies() {
+                        if !child.common().presence.occupies() || self.instances(child, &ctx.som) == 0 {
                             continue;
                         }
                         let csib = sibs.at(ci);
@@ -775,7 +781,9 @@ impl Layouter<'_> {
                             continue;
                         }
                         let (cw, ch) = self.size_of(child, inner_w, &ctx, depth + 1);
-                        self.flow_block(child, inner_x, (cw, ch), &ctx, depth + 1, csib)?;
+                        for instance in 0..self.instances(child, &ctx.som) {
+                            self.flow_block(child, inner_x, (cw, ch), &ctx, depth + 1, csib + instance)?;
+                        }
                     }
                 }
             }
@@ -801,7 +809,7 @@ impl Layouter<'_> {
             sf.overflow_leader.as_ref().and_then(|name| sf.children.iter().position(|c| c.common().name.as_deref() == Some(name) && is_row(c)));
         let sibs = SomIndices::of(&sf.children);
         for (ci, child) in sf.children.iter().enumerate() {
-            if !child.common().presence.occupies() {
+            if !child.common().presence.occupies() || self.instances(child, &ctx.som) == 0 {
                 continue;
             }
             let csib = sibs.at(ci);
@@ -836,7 +844,9 @@ impl Layouter<'_> {
                 continue;
             }
             let (cw, ch) = self.size_of(child, inner_w, ctx, depth + 1);
-            self.flow_block(child, x, (cw, ch), ctx, depth + 1, csib)?;
+            for instance in 0..self.instances(child, &ctx.som) {
+                self.flow_block(child, x, (cw, ch), ctx, depth + 1, csib + instance)?;
+            }
         }
         Ok(())
     }
@@ -850,10 +860,10 @@ impl Layouter<'_> {
     /// repeating subform's `occur` and data instances ([`instance_count`]); one for anything else.
     fn instances(&self, node: &Node, parent_som: &str) -> usize {
         let Node::Subform(sf) = node else { return 1 };
-        let from_data = match (&sf.common.name, self.data) {
-            (Some(name), Some(d)) if sf.occur.max != Some(1) => d.count(&data_path(self.tpl, parent_som), name),
-            _ => 0,
-        };
+        let from_data = self
+            .data
+            .filter(|d| !d.children.is_empty())
+            .map(|d| sf.common.name.as_ref().map_or(0, |name| d.count(&data_path(self.tpl, parent_som), name)));
         instance_count(&sf.occur, from_data)
     }
 
@@ -874,6 +884,9 @@ impl Layouter<'_> {
     }
 
     fn size_of(&self, node: &Node, avail_w: f64, ctx: &Ctx, depth: usize) -> (f64, f64) {
+        if self.instances(node, &ctx.som) == 0 {
+            return (0.0, 0.0);
+        }
         let c = node.common();
         let spent = self.measures.get().saturating_add(1);
         self.measures.set(spent);
@@ -892,6 +905,7 @@ impl Layouter<'_> {
             && let Some(m) = cache.get(&key)
             && m.font == ctx.font
             && m.para == ctx.para
+            && m.parent_som == ctx.som
         {
             return m.size;
         }
@@ -899,7 +913,7 @@ impl Layouter<'_> {
         if let Some(key) = key
             && let Ok(mut cache) = self.measured.try_borrow_mut()
         {
-            cache.insert(key, Measured { font: ctx.font.clone(), para: ctx.para.clone(), size });
+            cache.insert(key, Measured { font: ctx.font.clone(), para: ctx.para.clone(), parent_som: ctx.som.clone(), size });
         }
         size
     }
@@ -947,14 +961,16 @@ impl Layouter<'_> {
                             let cols = self.columns(s, inner_w);
                             s.children
                                 .iter()
-                                .filter(|k| k.common().presence.occupies())
-                                .map(|k| match k {
-                                    Node::Subform(r) if r.layout == Layout::Row => self.row_height(r, &cols, inner_w, &ctx, depth + 1),
-                                    _ => self.size_of(k, inner_w, &ctx, depth + 1).1,
+                                .filter(|k| k.common().presence.occupies() && self.instances(k, &som) > 0)
+                                .map(|k| {
+                                    (match k {
+                                        Node::Subform(r) if r.layout == Layout::Row => self.row_height(r, &cols, inner_w, &ctx, depth + 1),
+                                        _ => self.size_of(k, inner_w, &ctx, depth + 1).1,
+                                    }) * self.instances(k, &som) as f64
                                 })
                                 .sum()
                         }
-                        Layout::Row => self.row_height(s, &self.columns(s, inner_w), inner_w, &ctx, depth + 1),
+                        Layout::Row => self.cells(s, &self.columns(s, inner_w), inner_w, &ctx, depth + 1).1,
                     },
                 };
                 content + c.margin.vertical()
@@ -987,7 +1003,7 @@ impl Layouter<'_> {
             Node::Area(a) => (&a.children, Layout::Positioned),
             _ => return avail_w,
         };
-        let visible = children.iter().filter(|k| k.common().presence.occupies());
+        let visible = children.iter().filter(|k| k.common().presence.occupies() && self.instances(k, &ctx.som) > 0);
         match layout {
             Layout::LrTb | Layout::RlTb | Layout::Row => {
                 let sum: f64 = visible.map(|k| self.size_of(k, avail_w, ctx, depth + 1).0).sum();
@@ -1093,7 +1109,7 @@ impl Layouter<'_> {
     fn positioned_height(&self, children: &[Node], inner_w: f64, ctx: &Ctx, depth: usize) -> f64 {
         children
             .iter()
-            .filter(|k| k.common().presence.occupies())
+            .filter(|k| k.common().presence.occupies() && self.instances(k, &ctx.som) > 0)
             .map(|k| {
                 let c = k.common();
                 let (w, h) = self.size_of(k, (inner_w - c.x.unwrap_or(0.0)).max(1.0), ctx, depth + 1);
@@ -1109,7 +1125,7 @@ impl Layouter<'_> {
         let mut out = Vec::new();
         let (mut x, mut y, mut line_h) = (0.0, 0.0, 0.0);
         for (i, k) in children.iter().enumerate() {
-            if !k.common().presence.occupies() {
+            if !k.common().presence.occupies() || self.instances(k, som) == 0 {
                 continue;
             }
             let (w, h) = self.size_of(k, inner_w, ctx, depth + 1);
@@ -1145,7 +1161,7 @@ impl Layouter<'_> {
         let mut x = 0.0;
         let mut h: f64 = 0.0;
         for (i, k) in row.children.iter().enumerate() {
-            if !k.common().presence.occupies() {
+            if !k.common().presence.occupies() || self.instances(k, &ctx.som) == 0 {
                 continue;
             }
             let span = k.common().col_span.max(1);
@@ -1164,7 +1180,8 @@ impl Layouter<'_> {
     }
 
     fn row_height(&self, row: &Subform, cols: &[f64], inner_w: f64, ctx: &Ctx, depth: usize) -> f64 {
-        self.cells(row, cols, inner_w, ctx, depth).1
+        let ctx = ctx.with_som(&row.common, 0);
+        self.cells(row, cols, inner_w, &ctx, depth).1
     }
 
     // ───────────────────────────────────────────────────────────────────────── drawing
@@ -1191,7 +1208,7 @@ impl Layouter<'_> {
 
     fn draw_positioned_child(&mut self, k: &Node, inner: Rect, ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         let c = k.common();
-        if !c.presence.occupies() {
+        if !c.presence.occupies() || self.instances(k, &ctx.som) == 0 {
             return Ok(());
         }
         let (w, h) = self.size_of(k, (inner.w - c.x.unwrap_or(0.0)).max(1.0), ctx, depth + 1);
@@ -1204,7 +1221,7 @@ impl Layouter<'_> {
             return Ok(());
         }
         let c = node.common();
-        if c.presence == Presence::Invisible {
+        if c.presence == Presence::Invisible || self.instances(node, &ctx.som) == 0 {
             return Ok(());
         }
         match node {
@@ -1249,7 +1266,7 @@ impl Layouter<'_> {
                     Layout::Tb => {
                         let mut y = inner.y;
                         for (i, k) in s.children.iter().enumerate() {
-                            if !k.common().presence.occupies() {
+                            if !k.common().presence.occupies() || self.instances(k, &ctx.som) == 0 {
                                 continue;
                             }
                             let (w, h) = self.size_of(k, inner.w, &ctx, depth + 1);
@@ -1276,7 +1293,7 @@ impl Layouter<'_> {
                         let cols = self.columns(s, inner.w);
                         let mut y = inner.y;
                         for (i, k) in s.children.iter().enumerate() {
-                            if !k.common().presence.occupies() {
+                            if !k.common().presence.occupies() || self.instances(k, &ctx.som) == 0 {
                                 continue;
                             }
                             let csib = sibs.at(i);
@@ -1284,12 +1301,16 @@ impl Layouter<'_> {
                                 && r.layout == Layout::Row
                             {
                                 let h = self.row_height(r, &cols, inner.w, &ctx, depth + 1);
-                                self.draw_row(r, &cols, Rect::new(inner.x, y, inner.w, h), &ctx, depth + 1, csib)?;
-                                y += h;
+                                for instance in 0..self.instances(k, &ctx.som) {
+                                    self.draw_row(r, &cols, Rect::new(inner.x, y, inner.w, h), &ctx, depth + 1, csib + instance)?;
+                                    y += h;
+                                }
                             } else {
                                 let (w, h) = self.size_of(k, inner.w, &ctx, depth + 1);
-                                self.draw_node(k, Rect::new(inner.x, y, w, h), &ctx, depth + 1, csib)?;
-                                y += h;
+                                for instance in 0..self.instances(k, &ctx.som) {
+                                    self.draw_node(k, Rect::new(inner.x, y, w, h), &ctx, depth + 1, csib + instance)?;
+                                    y += h;
+                                }
                             }
                         }
                     }
