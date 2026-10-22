@@ -3667,14 +3667,39 @@ impl Session {
         let js_off = self.js_off;
         let doc = self.doc_mut(id)?;
         doc.edit_notices.clear();
-        let name = doc.name.clone();
-        let is_xfa = doc.info.xfa.is_some();
         let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48));
         if !js_off {
             cx.xfa = doc.xfa_template.clone();
         }
         cx.pages = doc.info.pages.len();
         cx.today = today;
+        let result = Self::apply_with_context(doc, edit, js_off, &mut cx);
+        // Runtime safety state is independent of the PDF transaction. A final flush or
+        // layout failure must not re-enable a script we already had to abandon.
+        if result.is_ok() || cx.xfa_ran_away {
+            if result.is_ok() {
+                if let Some(js) = cx.js {
+                    doc.js_output.append(js.output);
+                }
+            } else {
+                // Keep diagnostics, but never act on requests from a rejected edit.
+                cx.xfa_out.requests.clear();
+            }
+            doc.js_output.append(cx.xfa_out);
+            if cx.xfa_ran_away {
+                doc.xfa_template = None;
+                doc.xfa_scripts_off = true;
+                doc.js_output.errors.push(XFA_SCRIPTS_OFF.into());
+            }
+        }
+        result
+    }
+
+    /// Prepare, validate and publish an edit on a copy. The caller retains runtime
+    /// safety state even when this returns early and discards the working document.
+    fn apply_with_context(doc: &mut Document, edit: Edit, js_off: bool, cx: &mut EditCtx) -> Result<(), EditError> {
+        let name = doc.name.clone();
+        let is_xfa = doc.info.xfa.is_some();
         let reason = doc.read_only_reason.clone().unwrap_or_default();
         let signed = doc.is_signed();
         let editor = doc.editor.as_mut().ok_or(EditError::ReadOnly(reason))?;
@@ -3708,7 +3733,7 @@ impl Session {
         }
         cx.renamed_fields.clear();
         // `next` is a copy: if the edit fails or crashes, the document is unchanged.
-        guard(|| run_edit(&mut next, &edit, &mut cx))
+        guard(|| run_edit(&mut next, &edit, cx))
             .unwrap_or_else(|m| Err(EditError::Invalid(format!("{} failed unexpectedly ({m}); the document was not changed", edit.label()))))?;
         // Redaction removed what its own interpreter places under the marks. The marks were drawn
         // over the page as the renderer shows it, so the renderer has the last word.
@@ -3841,15 +3866,6 @@ impl Session {
         note_warnings(&mut doc.xfa_warnings, &xfa_notes);
         let notes = doc.xfa_warnings.clone();
         note_warnings(&mut doc.info.warnings, &notes);
-        if let Some(js) = cx.js {
-            doc.js_output.append(js.output);
-        }
-        doc.js_output.append(cx.xfa_out);
-        if cx.xfa_ran_away {
-            doc.xfa_template = None;
-            doc.xfa_scripts_off = true;
-            doc.js_output.errors.push(XFA_SCRIPTS_OFF.into());
-        }
         Ok(())
     }
 

@@ -6409,3 +6409,80 @@ fn xfa_import_work_exhaustion_rolls_back_imported_data() {
     assert!(s.get(id).unwrap().can_undo().is_none());
     assert!(!s.get(id).unwrap().form.iter().any(|f| f.name.starts_with("entry")));
 }
+
+/// A finalization failure must roll back real script changes but retain the runtime
+/// circuit breaker after abandonment. Fault injection avoids leaving a runaway thread.
+#[test]
+fn xfa_post_abandon_failure_preserves_safety_state_and_rolls_back() {
+    for abandoned in [true, false] {
+        for path in ["field", "import", "click"] {
+            let effects = r#"_row.addInstance(1); other.rawValue = "changed"; remove.access = "readOnly";
+                xfa.host.messageBox("before failure"); console.println("before failure");"#;
+            let mut tpl = pdfcraft_xfa::fixtures::optional_rows(1).replace(r#"max="2""#, r#"max="-1""#);
+            if path == "click" {
+                tpl = tpl.replace("_row.addInstance(1);", &format!(r#"{effects} xfa.host.print(); xfa.host.setFocus("other");"#));
+            } else {
+                let event = if path == "field" {
+                    format!(r#"<event activity="exit"><script contentType="application/x-javascript">{effects}</script></event>"#)
+                } else {
+                    format!(
+                        r#"<calculate><script contentType="application/x-javascript">if (other.rawValue == "trigger") {{ {effects} }}</script></calculate>"#
+                    )
+                };
+                tpl = tpl.replace(
+                    r#"<field name="other" w="200pt" h="20pt"><ui><textEdit/></ui></field>"#,
+                    &format!(r#"<field name="other" w="200pt" h="20pt"><ui><textEdit/></ui>{event}</field>"#),
+                );
+            }
+            let mut s = Session::new().with_clock(|| 1_700_000_000);
+            let id = s.open("post-abandon.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+            // Imports start clean; the other paths preserve populated undo and redo stacks.
+            if path != "import" {
+                for value in ["first", "second"] {
+                    s.apply(id, Edit::SetFieldValue { name: "entry".into(), value: FieldValue::Text(value.into()) }).unwrap();
+                }
+                s.undo(id).unwrap();
+            }
+            s.take_js_output(id);
+            let before = s.save_bytes(id).unwrap();
+            let doc = s.get(id).unwrap();
+            let generation = doc.edit_generation();
+            let dirty = doc.dirty;
+            let fields = format!("{:?}", doc.form);
+            let undo = doc.can_undo().map(str::to_string);
+            let redo = doc.can_redo().map(str::to_string);
+            let edit = match path {
+                "field" => Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("trigger".into()) },
+                "import" => Edit::ImportData {
+                    name: "data.xml".into(),
+                    bytes: Arc::new(b"<form><row><entry>imported</entry></row><other>trigger</other></form>".to_vec()),
+                },
+                _ => Edit::XfaEvent { som: "form[0].add[0]".into(), activity: "click".into() },
+            };
+            let error = crate::xfa::test_faults::with_finish_failure(abandoned, || s.apply(id, edit)).unwrap_err();
+            assert!(error.to_string().contains("Injected XFA final flush failure"), "{path}: {error}");
+            assert!(s.save_bytes(id).unwrap() == before, "{path}: file changes must roll back");
+            let doc = s.get(id).unwrap();
+            assert_eq!(format!("{:?}", doc.form), fields);
+            assert_eq!(doc.edit_generation(), generation);
+            assert_eq!(doc.dirty, dirty);
+            assert_eq!(doc.can_undo(), undo.as_deref());
+            assert_eq!(doc.can_redo(), redo.as_deref());
+            assert_eq!(doc.xfa_scripts_off(), abandoned, "{path}");
+            assert_eq!(doc.xfa_template.is_none(), abandoned, "{path}");
+            let out = s.take_js_output(id);
+            assert!(out.requests.is_empty(), "{path}: requests from a rejected edit must not escape");
+            if abandoned {
+                assert!(out.errors.iter().any(|e| e.contains("Injected script abandonment")));
+                assert_eq!(out.errors.iter().filter(|e| e.as_str() == XFA_SCRIPTS_OFF).count(), 1);
+                assert!(out.alerts.iter().any(|a| a == "before failure"));
+                assert!(out.console.iter().any(|c| c == "before failure"));
+                // Another edit succeeds without running the form's scripts again.
+                s.apply(id, Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("trigger".into()) }).unwrap();
+                assert!(s.take_js_output(id).is_empty());
+                assert_eq!(s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("entry")).count(), 1);
+                assert!(s.get(id).unwrap().xfa_scripts_off());
+            }
+        }
+    }
+}

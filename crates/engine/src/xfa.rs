@@ -824,6 +824,14 @@ impl<'a, 'b> Runner<'a, 'b> {
             self.relayouts_skipped = false;
             self.relayout()?;
         }
+        #[cfg(test)]
+        if let Some(abandoned) = test_faults::take_finish_failure() {
+            self.run.ran_away |= abandoned;
+            if abandoned {
+                self.error("Injected script abandonment before finalization".into());
+            }
+            return Err("Injected XFA final flush failure".into());
+        }
         self.flush()?;
         self.session = None;
         if self.skipped > 0 {
@@ -967,6 +975,36 @@ pub(crate) fn mark_script_buttons(doc: &pdfcraft_cos::Document, fields: &mut [pd
         {
             f.button = Some(pdfcraft_forms::af::ButtonAction::Script(String::new()));
         }
+    }
+}
+
+/// Scoped finalization faults avoid timing-dependent tests and abandoned worker threads.
+#[cfg(test)]
+pub(crate) mod test_faults {
+    use std::cell::Cell;
+
+    thread_local! {
+        static FINISH_FAILURE: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    /// Inject one finalization failure on this test thread; optionally model an abandoned
+    /// script. Restore the previous setting even if the test panics.
+    pub(crate) fn with_finish_failure<T>(abandoned: bool, action: impl FnOnce() -> T) -> T {
+        struct Restore(Option<bool>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                FINISH_FAILURE.with(|v| v.set(self.0));
+            }
+        }
+        let _restore = Restore(FINISH_FAILURE.with(|v| v.replace(Some(abandoned))));
+        let result = action();
+        assert!(FINISH_FAILURE.with(|v| v.get().is_none()), "the test must reach finalization");
+        result
+    }
+
+    /// Consume the fault once, without affecting other tests or subsequent edits.
+    pub(super) fn take_finish_failure() -> Option<bool> {
+        FINISH_FAILURE.with(Cell::take)
     }
 }
 

@@ -136,7 +136,9 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   transaction and keeps the prior document, rather than publishing partial data or geometry.
   Field changes and data imports propagate fatal replay/layout failures too, including after
   earlier scripts or reset operations flushed changes. Ordinary validation warnings still
-  retain the entered value.
+  retain the entered value. If a script was abandoned before a later finalization failure,
+  scripting stays disabled for that open document and diagnostics remain available, without
+  committing PDF changes or an undo entry. Viewer requests from the rejected edit are discarded.
   This bounds replay amplification; it is not a general JavaScript allocation budget.
   What open-time scripts change is noted in the document's XFA warnings. Known gaps: the
   engine's loop limit is per call frame, so loops inside nested calls can run far longer; such
