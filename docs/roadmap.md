@@ -1,6 +1,6 @@
 # PdfCraft roadmap: milestones and what's next
 
-> **Last updated:** 2026-10-22 · **Change:** minor (M12: integrate upstream XFA improvements with zero-instance support and rollback safeguards; estimates unchanged).
+> **Last updated:** 2026-10-22 · **Change:** minor (M12: integrate upstream script security and consolidated tests with zero-instance support and rollback safeguards; estimates unchanged).
 
 > **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M12 #3673: Character encoding accepts Identity-H/V with Adobe CJK collections; estimates unchanged)
 
@@ -241,6 +241,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | M12: retain upstream checked dynamic JavaScript compilation, move zero-instance automation into the shared integration binary, and refresh test evidence paths. Estimates unchanged. |
 | 2026-10-22 | minor | M12: reconcile upstream XFA improvements with zero-instance defaults and fatal-error rollback; estimates unchanged. |
 | 2026-10-21 | minor | M12: preserve the runtime scripts-off flag and diagnostics after post-abandon edit failure, with deterministic field/import/click rollback tests. Estimates unchanged. |
 | 2026-10-21 | minor | M12: absent overflow leaders, unnamed occurrence defaults and atomic field-change/import replay failures; synthetic regressions. Estimates unchanged. |

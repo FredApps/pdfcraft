@@ -189,6 +189,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+- 2026-10-22 — M12 (#3941): integrate upstream checked dynamic JavaScript compilation and consolidated integration tests; preserve zero-instance and fatal-error rollback coverage. Estimates unchanged.
 - 2026-10-22 — M12 (#3941): integrate upstream XFA date formatting, visibility, sizing and text reflow with zero-instance support; retain ordinary script-error effects while fatal finalization failures roll back. Estimates unchanged.
 - **2026-10-13 (M7, free image rotation):** A selected page image has a rotate knob (Shift: 15 degree steps) and `image_edit` a `rotate_by` action; the angle is written as one undoable `cm`. Snapping to page edges while moving is in #1740; resize snapping is not done. Estimates unchanged.
 
