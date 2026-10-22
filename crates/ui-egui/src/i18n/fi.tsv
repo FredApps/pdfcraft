@@ -2827,3 +2827,18 @@ theme	Appearance	Teema
 	Rotate the selected pages clockwise	Kierrä valittuja sivuja myötäpäivään
 	Extract the selected pages…	Pura valitut sivut…
 	Delete the selected pages	Poista valitut sivut
+# Comments copied, pasted and selected together (M5).
+	Copy comment	Kopioi kommentti
+	Copy comments	Kopioi kommentit
+	Paste comments	Liitä kommentit
+	Delete comments	Poista kommentit
+	Move comments	Siirrä kommentit
+	Complete	Valmis
+	Undo last point	Kumoa viimeinen piste
+	Cancel drawing	Peruuta piirtäminen
+	Copy comments first	Kopioi ensin kommentteja
+	Click where the copied comments go; Escape lets them go	Napsauta kohtaa, johon kopioidut kommentit tulevat; Esc vapauttaa ne
+	The copied comments are larger than this page; they were placed as they are	Kopioidut kommentit ovat tätä sivua suurempia; ne sijoitettiin sellaisinaan
+	The clipboard holds no comments	Leikepöydällä ei ole kommentteja
+	Comments: {n}	Kommentit: {n}
+	Changes here apply to all {n} selected comments	Muutokset koskevat kaikkia {n} valittua kommenttia
