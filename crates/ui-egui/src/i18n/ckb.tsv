@@ -2751,3 +2751,7 @@ certificate	Version	وەشان
 	Delete the selected pages	پەڕە هەڵبژێردراوەکان بسڕەوە
 # Fill & Sign text: the border around it (M5).
 	Border:	سنوور:
+
+# A text border's own colour (M5).
+	Border colour	ڕەنگی سنوور
+	Same as text	وەک دەق

@@ -2559,3 +2559,7 @@ animation effects	Off	オフ
 	Delete the selected pages	選択したページを削除
 # Fill & Sign text: the border around it (M5).
 	Border:	境界線:
+
+# A text border's own colour (M5).
+	Border colour	境界線の色
+	Same as text	テキストと同じ

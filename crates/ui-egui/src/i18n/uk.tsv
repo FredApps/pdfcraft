@@ -2581,3 +2581,7 @@ animation effects	Off	Вимкнено
 	Delete the selected pages	Видалити вибрані сторінки
 # Fill & Sign text: the border around it (M5).
 	Border:	Рамка:
+
+# A text border's own colour (M5).
+	Border colour	Колір рамки
+	Same as text	Як у тексту

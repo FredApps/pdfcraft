@@ -223,6 +223,12 @@ impl CommentTool {
         if matches!(self, Self::TextBox | Self::Callout) { 0.0 } else { 0.5 }
     }
 
+    /// Whether the border-colour control applies to this tool: text boxes and callouts, whose
+    /// border takes the text colour unless it has its own.
+    pub fn has_border_color(self) -> bool {
+        matches!(self, Self::TextBox | Self::Callout)
+    }
+
     /// Whether the fill-colour control applies to this tool.
     pub fn has_fill(self) -> bool {
         matches!(self, Self::Rectangle | Self::Oval | Self::Polygon | Self::Cloud | Self::TextBox | Self::Callout)
@@ -331,6 +337,14 @@ impl CommentPrefs {
     pub fn set_fill(&mut self, tool: CommentTool, fill: Option<Rgb>) {
         if let Some((_, s)) = self.styles.iter_mut().find(|(t, _)| *t == tool) {
             s.fill = if tool.has_fill() { fill.filter(|c| c.iter().all(|x| x.is_finite())).map(|c| c.map(|x| x.clamp(0.0, 1.0))) } else { None };
+        }
+    }
+
+    /// The border's own colour for new text boxes and callouts (`None`: the text colour).
+    pub fn set_border_color(&mut self, tool: CommentTool, color: Option<Rgb>) {
+        if let Some((_, s)) = self.styles.iter_mut().find(|(t, _)| *t == tool) {
+            s.border_color =
+                if tool.has_border_color() { color.filter(|c| c.iter().all(|x| x.is_finite())).map(|c| c.map(|x| x.clamp(0.0, 1.0))) } else { None };
         }
     }
 

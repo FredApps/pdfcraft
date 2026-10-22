@@ -2796,3 +2796,7 @@ theme	Appearance	स्वरूप
 	Delete the selected pages	चयनित पृष्ठ हटाएँ
 # Fill & Sign text: the border around it (M5).
 	Border:	बॉर्डर:
+
+# A text border's own colour (M5).
+	Border colour	बॉर्डर का रंग
+	Same as text	पाठ जैसा

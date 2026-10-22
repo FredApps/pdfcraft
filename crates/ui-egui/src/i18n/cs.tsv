@@ -2866,3 +2866,7 @@ certificate	Version	Verze
 	Delete the selected pages	Odstranit vybrané stránky
 # Fill & Sign text: the border around it (M5).
 	Border:	Ohraničení:
+
+# A text border's own colour (M5).
+	Border colour	Barva ohraničení
+	Same as text	Stejně jako text

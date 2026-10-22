@@ -103,6 +103,7 @@ impl PdfCraftApp {
             "flatten_fill_sign": self.flatten_fill_sign_on_save,
             "fill_text_size": self.fill_text_size,
             "fill_text_border": self.fill_text_border,
+            "fill_text_border_color": self.fill_text_border_color,
             "date_format": self.session.date_format(),
             // Null follows the interface language.
             "date_language": self.session.date_language(),
@@ -118,6 +119,7 @@ impl PdfCraftApp {
                     "opacity": s.opacity,
                     "width": s.width,
                     "fill": s.fill,
+                    "border_color": s.border_color,
                 }))
                 .collect::<Vec<_>>(),
             // Drawn signatures keep their original form (older settings read the same).
@@ -265,6 +267,16 @@ impl PdfCraftApp {
         if let Some(width) = v["fill_text_border"].as_f64().and_then(fill_sign::valid_text_border) {
             self.fill_text_border = width;
         }
+        // `null` is a saved "the text's colour"; a missing or malformed one keeps the setting.
+        match v.get("fill_text_border_color") {
+            Some(serde_json::Value::Null) => self.fill_text_border_color = None,
+            Some(c) => {
+                if let Some(c) = rgb_triple(c) {
+                    self.fill_text_border_color = Some(c.map(|x| x.clamp(0.0, 1.0)));
+                }
+            }
+            None => {}
+        }
         if let Some(prefs) = RedactPrefs::from_json(&v["redact_prefs"]) {
             self.redact_prefs = prefs.clone();
             self.redact_defaults = prefs;
@@ -327,6 +339,9 @@ impl PdfCraftApp {
                     let mut s = self.comment_prefs.style(tool);
                     s.fill = fill;
                     self.comment_prefs.set_style(tool, s);
+                }
+                if let Some(c) = rgb_triple(&e["border_color"]) {
+                    self.comment_prefs.set_border_color(tool, Some(c));
                 }
             }
         }

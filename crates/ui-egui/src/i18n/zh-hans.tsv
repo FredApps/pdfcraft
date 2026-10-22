@@ -2523,3 +2523,7 @@ animation effects	Off	关
 	Delete the selected pages	删除所选页面
 # Fill & Sign text: the border around it (M5).
 	Border:	边框：
+
+# A text border's own colour (M5).
+	Border colour	边框颜色
+	Same as text	与文字相同

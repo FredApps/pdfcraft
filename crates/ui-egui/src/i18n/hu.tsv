@@ -2558,3 +2558,7 @@ animation effects	Off	Ki
 	Delete the selected pages	A kijelölt oldalak törlése
 # Fill & Sign text: the border around it (M5).
 	Border:	Szegély:
+
+# A text border's own colour (M5).
+	Border colour	Szegély színe
+	Same as text	Mint a szöveg

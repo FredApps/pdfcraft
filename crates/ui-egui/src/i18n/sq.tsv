@@ -2546,3 +2546,7 @@ animation effects	Off	Joaktiv
 	Delete the selected pages	Fshi faqet e përzgjedhura
 # Fill & Sign text: the border around it (M5).
 	Border:	Korniza:
+
+# A text border's own colour (M5).
+	Border colour	Ngjyra e kornizës
+	Same as text	Si teksti

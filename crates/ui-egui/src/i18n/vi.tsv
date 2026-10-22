@@ -2826,3 +2826,7 @@ key	Space	Space
 	Delete the selected pages	Xóa các trang đã chọn
 # Fill & Sign text: the border around it (M5).
 	Border:	Viền:
+
+# A text border's own colour (M5).
+	Border colour	Màu viền
+	Same as text	Giống chữ

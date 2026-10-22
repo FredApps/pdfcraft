@@ -867,7 +867,7 @@ struct PageEnv<'a> {
     visible_pages: &'a Vec<usize>,
     y_shift: f32,
     fill_text_size: f64,
-    fill_text_border: f64,
+    fill_text_border: crate::fill_sign::TextBorder,
     today: (i64, u32, u32),
 }
 
@@ -3070,7 +3070,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         visible_pages: &visible_pages,
         y_shift,
         fill_text_size: app.fill_text_size,
-        fill_text_border: app.fill_text_border,
+        fill_text_border: crate::fill_sign::TextBorder { width: app.fill_text_border, color: app.fill_text_border_color },
         today,
     };
     let mut page_out = PageOut::default();

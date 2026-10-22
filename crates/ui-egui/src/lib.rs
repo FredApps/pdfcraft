@@ -305,6 +305,8 @@ pub struct PdfCraftApp {
     pub fill_text_size: f64,
     /// Border around new Fill & Sign text and dates, in points (0: none), kept across launches.
     pub fill_text_border: f64,
+    /// That border's own colour (`None`: the text's), kept across launches.
+    pub fill_text_border_color: Option<pdfcraft_engine::Rgb>,
     pub dialog: Option<Dialog>,
     /// How to ask for the latest release (the desktop app sets it; see `updates`).
     pub(crate) updates: updates::Updates,
