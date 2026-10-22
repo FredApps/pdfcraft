@@ -68,6 +68,9 @@ pub struct XfaNode {
     pub children: Vec<XfaNode>,
     /// Dormant child definitions, available to instance managers but absent from the live DOM.
     pub instance_templates: Vec<XfaNode>,
+    /// Fields: the value shown in the field's display picture, what `formattedValue` reads;
+    /// `None` when the picture doesn't change it (the raw value is read then).
+    pub formatted: Option<String>,
 }
 
 /// The event a script runs for.
@@ -215,6 +218,8 @@ pub(crate) struct HNode {
     pub(crate) default_source: Option<usize>,
     /// Removed by `removeInstance`: skipped everywhere.
     pub(crate) gone: bool,
+    /// See [`XfaNode::formatted`]; dropped when a script sets the value, which it no longer shows.
+    pub(crate) formatted: Option<String>,
 }
 
 /// The form as a script sees and changes it, with the effects it records.
@@ -357,6 +362,7 @@ impl XHost {
         // the snapshot stays bounded however often a long value is written.
         let (text, cut) = clip_value(text);
         n.value = text.clone();
+        n.formatted = None;
         let som = n.som.clone();
         if cut {
             self.clipped_values += 1;
@@ -368,11 +374,13 @@ impl XHost {
 
 type Shared = RefCell<XHost>;
 
+/// The form host of the script running in `ctx`.
 fn host(ctx: &Context) -> JsResult<&Shared> {
     ctx.get_data::<Shared>().ok_or_else(|| error("the XFA script host is not set up"))
 }
 
-/// Import a live root into the bounded host arena; definitions remain separately addressable.
+/// Flatten a live root into the host arena within [`MAX_DEPTH`] and [`MAX_NODES`], keeping
+/// dormant definitions separately addressable. Return the root index, or `None` past the limits.
 fn flatten(n: &XfaNode, parent: Option<usize>, out: &mut Vec<HNode>, depth: usize) -> Option<usize> {
     flatten_definition(n, parent, out, depth, false)
 }
@@ -403,6 +411,7 @@ fn flatten_definition(n: &XfaNode, parent: Option<usize>, out: &mut Vec<HNode>, 
         dormant,
         default_source: None,
         gone: false,
+        formatted: n.formatted.clone(),
     });
     let mut kids = Vec::new();
     for c in &n.children {
@@ -679,6 +688,9 @@ fn clone_subtree(h: &mut XHost, src: usize, parent: Option<usize>, depth: usize,
                 dormant,
                 default_source: if n.dormant { Some(src) } else { n.default_source },
                 gone: false,
+                // A template clone retains its default value and matching display together.
+                // A blank live-row clone must not retain its source's formatted value.
+                formatted: if preserve_values { n.formatted.clone() } else { None },
             },
             n.children.clone(),
             n.instance_templates.clone(),
@@ -892,6 +904,8 @@ pub(crate) fn resolve_som(h: &XHost, from: usize, expr: &str) -> Vec<usize> {
     cur
 }
 
+/// The live descendants of node `from` named `name` (`from..name` in a SOM path), in document
+/// order, to [`MAX_DEPTH`].
 pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize) -> Vec<usize> {
     let mut out = Vec::new();
     if depth > MAX_DEPTH {
@@ -913,6 +927,8 @@ pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize
 }
 
 /// Read an XFA property or live child; underscore managers can resolve even at zero instances.
+/// A property read on a form node's Proxy: its value (and `formattedValue` as its picture shows
+/// it), attributes, relatives, methods, instance managers and children by name.
 fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(&arg(args, 0), ctx)?;
     let key = arg(args, 1);
@@ -929,7 +945,7 @@ fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
     Ok(match key.as_str() {
         IDX => JsValue::from(idx as f64),
         "rawValue" | "value" => host(ctx)?.borrow().nodes.get(idx).map_or(JsValue::null(), value_js),
-        "formattedValue" => s(&value),
+        "formattedValue" => s(&host(ctx)?.borrow().nodes.get(idx).and_then(|n| n.formatted.clone()).unwrap_or(value)),
         "name" => s(&name),
         "somExpression" => s(&som),
         "className" => s(kind.class_name()),
