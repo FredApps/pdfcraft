@@ -30,6 +30,9 @@ const MAX_IMAGE_PIXELS: u64 = 1 << 28;
 /// sources need not fit u16: a 65536-pixel strip can safely shrink to a 16-pixel image.
 /// This resource cap follows the existing CCITT column limit; the filter-work estimate below
 /// additionally bounds tables/scratch before entering the opaque PicScale planner.
+/// Filter work itself stays linear in source + target pixels: `draw_image` rejects sources over
+/// `MAX_IMAGE_PIXELS`, so even a worst-case full-limit photo is one bounded pass, not an
+/// unbounded operation — a refused plan falls back to nearest, which is cheaper still.
 const MAX_RESAMPLING_SOURCE_SIDE: u32 = 1 << 20;
 const MAX_RESAMPLING_PLAN_BYTES: usize = 128 << 20;
 
@@ -736,8 +739,7 @@ impl Renderer {
         let scaler = if smooth { &self.scaler } else { &nearest };
         // A refused plan returns the owned input unchanged, so the nearest retry reuses it
         // instead of copying the source buffer (an unchecked clone could abort on a huge image).
-        let mut resized = Self::resize_format(
-            self,
+        let mut resized = self.resize_format(
             pixel_format,
             scaler,
             smooth,
@@ -749,9 +751,8 @@ impl Renderer {
         );
         resized = match resized {
             Err(original) if smooth && !explicit_interpolate => {
-                log::warn!("Smooth image resampling was refused; falling back to nearest-neighbour");
-                Self::resize_format(
-                    self,
+                log::warn!("Smooth image resampling plan was refused; falling back to nearest-neighbour");
+                self.resize_format(
                     pixel_format,
                     &nearest,
                     false,
@@ -1019,7 +1020,7 @@ impl Renderer {
                         smooth = false;
                         quality = ImageQuality::Low;
                         log::warn!(
-                            "Smooth image resampling was refused; falling back to nearest-neighbour"
+                            "Smooth image sizing was refused; falling back to nearest-neighbour sizing"
                         );
                         target
                     }
