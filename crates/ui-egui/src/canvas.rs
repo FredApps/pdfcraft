@@ -867,6 +867,7 @@ struct PageEnv<'a> {
     visible_pages: &'a Vec<usize>,
     y_shift: f32,
     fill_text_size: f64,
+    fill_text_border: f64,
     today: (i64, u32, u32),
 }
 
@@ -1113,6 +1114,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         tool,
         units,
         fill_text_size,
+        fill_text_border,
         ..
     } = frame.env;
     let PageSlot { i, xf, .. } = *slot;
@@ -1179,6 +1181,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
             crate::fill_sign::PageInput {
                 tool: ft,
                 text_size: fill_text_size,
+                text_border: fill_text_border,
                 signature: signature.as_ref(),
                 initials: initials.as_ref(),
                 preview: frame.signature_preview,
@@ -3067,6 +3070,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         visible_pages: &visible_pages,
         y_shift,
         fill_text_size: app.fill_text_size,
+        fill_text_border: app.fill_text_border,
         today,
     };
     let mut page_out = PageOut::default();

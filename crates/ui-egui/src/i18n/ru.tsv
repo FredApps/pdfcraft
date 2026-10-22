@@ -2470,3 +2470,5 @@ animation effects	Off	Выкл
 	Rotate the selected pages clockwise	Повернуть выбранные страницы по часовой стрелке
 	Extract the selected pages…	Извлечь выбранные страницы…
 	Delete the selected pages	Удалить выбранные страницы
+# Fill & Sign text: the border around it (M5).
+	Border:	Граница:
