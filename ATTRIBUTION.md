@@ -307,7 +307,7 @@ Every asset PdfCraft includes, bundles or uses to build its published material, 
 | `epaint_default_fonts` 0.36.2 | `fonts/emoji-icon-font.ttf` | emoji-icon-font | John Slegers | MIT | https://github.com/jslegers/emoji-icon-font | egui fallback fonts (eframe feature default_fonts) |
 | `hayro-interpret` 0.7.0 | `src/font/generated/metrics.rs` | Standard-14 font metrics and encodings (as Rust tables) (non-visual data, AGENTS.md §1.1) | Adobe (Core 14 AFM metrics, PDF specification encodings); tables by The Hayro Authors | MIT OR Apache-2.0 | ISO 32000-2 Annex D; Adobe Core14 AFM files (via vendored hayro-interpret) | Glyph widths and encodings for non-embedded standard fonts. Non-visual data, allowed by AGENTS.md §1.1 |
 
-## Downloaded at build time (25)
+## Downloaded at build time (22)
 
 Fonts are fetched by `cargo xtask demo-pdf` into `target/demo-fonts/`, OCR models by `cargo xtask models` into `assets/models/`; each is verified by SHA-256 and never committed.
 
@@ -335,6 +335,13 @@ Fonts are fetched by `cargo xtask demo-pdf` into `target/demo-fonts/`, OCR model
 | `Inter-Italic[opsz,wght].ttf` | Inter Italic (variable) | The Inter Project Authors (Rasmus Andersson) | OFL-1.1 | https://github.com/google/fonts/tree/9710da1eacb3be272583c3224dcb70f9da6eadbb/ofl/inter | Showcase PDF (cargo xtask demo-pdf) |
 | `text-detection.rten` | Ocrs text detection model | Robert Knight (ocrs-models; trained on HierText, CC-BY-SA-4.0) | CC-BY-SA-4.0 | https://github.com/robertknight/ocrs-models (the models ocrs downloads; model card: https://huggingface.co/robertknight/ocrs, cc-by-sa-4.0) | Scan & OCR: finds words on page images (cargo xtask models) |
 | `text-recognition.rten` | Ocrs text recognition model | Robert Knight (ocrs-models; trained on HierText, CC-BY-SA-4.0) | CC-BY-SA-4.0 | https://github.com/robertknight/ocrs-models (the models ocrs downloads; model card: https://huggingface.co/robertknight/ocrs, cc-by-sa-4.0) | Scan & OCR: reads the words it finds (cargo xtask models) |
+
+## Published evidence (3)
+
+Remote screenshots and fixtures used for review or documentation. These are not build inputs and are never downloaded by build commands. Their URLs, licences and SHA-256 records are in `ATTRIBUTION.toml`.
+
+| File | Title | Author | Licence | Source | Used for |
+|---|---|---|---|---|---|
 | `pr-3941/after.png` | PdfCraft zero-instance XFA: after | PdfCraft contributors (@nnamdiarimah, generated with Codex) | MIT OR Apache-2.0 | https://github.com/storytold/pdfcraft/pull/3941/commits/fdd1b20d888230e038c052934b63c41b8f0c0021 | Remote PR #3941 evidence only; not a build input. Original synthetic XFA, PdfCraft UI and project fonts; no private document content. |
 | `pr-3941/zero-instances.pdf` | Original zero-instance XFA demonstration | PdfCraft contributors (@nnamdiarimah, generated with Codex) | MIT OR Apache-2.0 | https://github.com/storytold/pdfcraft/pull/3941/commits/fdd1b20d888230e038c052934b63c41b8f0c0021 | Remote PR #3941 evidence only; not a build input. Original synthetic XFA, PdfCraft UI and project fonts; no private document content. |
 | `pr-3941/before.png` | PdfCraft zero-instance XFA: upstream before | PdfCraft contributors (@nnamdiarimah, generated with Codex) | MIT OR Apache-2.0 | https://github.com/storytold/pdfcraft/tree/3e968c8aa24adfb729c6d45a3c98abf5fed07027 | Remote PR #3941 evidence only; not a build input. Original synthetic XFA, PdfCraft UI and project fonts; no private document content. |

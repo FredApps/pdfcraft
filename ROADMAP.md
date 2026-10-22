@@ -190,6 +190,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- 2026-10-22: M12 / PR #3941 review: separate published evidence from build downloads in attribution; retain remote-asset policy checks and test exclusion from build fetching. XFA behavior and estimates unchanged.
+
 - 2026-10-22: M12 / PR #3941: verified #4112 against its exact attachment on upstream and PR builds; published an original synthetic zero-row fixture, before/after screenshots and lifecycle reproduction steps. Remote assets are attributed; no compatibility scope or estimates changed.
 - 2026-10-22 — M12 (#3941): integrate upstream checked dynamic JavaScript compilation and consolidated integration tests; preserve zero-instance and fatal-error rollback coverage. Estimates unchanged.
 - 2026-10-22 — M12 (#3941): integrate upstream XFA date formatting, visibility, sizing and text reflow with zero-instance support; retain ordinary script-error effects while fatal finalization failures roll back. Estimates unchanged.
