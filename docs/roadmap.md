@@ -1,7 +1,6 @@
 # PdfCraft roadmap: milestones and what's next
 
 > **Last updated:** 2026-10-22 · **Change:** patch (M12 / PR #3941 review: classify published evidence separately from build downloads; XFA behavior and estimates unchanged).
-
 > **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (M14, #3558: rebase guarded macOS per-file association recovery onto current main; estimates unchanged)
 > **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M12 #3673: Character encoding accepts Identity-H/V with Adobe CJK collections; estimates unchanged)
 
