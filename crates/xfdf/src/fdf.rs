@@ -6,9 +6,11 @@ use super::*;
 /// with its replies: what Copy puts on the clipboard, and Export selected comments writes.
 pub fn export_xfdf_comments(doc: &Document, which: &[(usize, usize)], file: &str) -> String {
     let only = annots_with_replies(doc, which);
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">\n");
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xmlns:pdfcraft=\"{PDFCRAFT_NS}\" xml:space=\"preserve\">\n"
+    );
     out.push_str("<annots>\n");
-    xfdf_annots(doc, &mut out, Some(&only));
+    xfdf_annots(doc, &mut out, Some(&only), true);
     out.push_str("</annots>\n");
     let _ = writeln!(out, "<f href=\"{}\"/>", esc(file));
     out.push_str("</xfdf>\n");

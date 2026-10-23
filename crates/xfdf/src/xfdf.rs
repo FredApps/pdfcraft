@@ -50,7 +50,57 @@ fn annots_with_replies(doc: &Document, which: &[(usize, usize)]) -> HashSet<(usi
 
 /// Every comment as an XFDF element (one line per comment, replies included), or only those at
 /// the positions in `only`.
-fn xfdf_annots(doc: &Document, out: &mut String, only: Option<&HashSet<(usize, usize)>>) {
+/// The namespace of PdfCraft's own attributes in XFDF (`pdfcraft:keys`): other readers skip them.
+const PDFCRAFT_NS: &str = "https://github.com/storytold/pdfcraft#xfdf";
+/// At most this much text in a `pdfcraft:keys` attribute is read.
+const MAX_OWN_KEYS: usize = 64 * 1024;
+
+/// A value that means the same in another document: no reference or stream into this one.
+fn portable(o: &Object, depth: usize) -> bool {
+    match o {
+        Object::Ref(_) | Object::Stream(_) => false,
+        Object::Array(a) => depth < 4 && a.iter().all(|o| portable(o, depth + 1)),
+        Object::Dict(d) => depth < 4 && d.iter().all(|(_, o)| portable(o, depth + 1)),
+        _ => true,
+    }
+}
+
+/// The annotation's own PdfCraft keys (`/PC…`: a Fill & Sign item, a turned comment's box and
+/// angle, …) as one PDF dictionary, for a copy that is what the original was. Values that point
+/// into this document stay behind.
+fn own_keys(d: &Dict) -> Option<String> {
+    let mut keys = Dict::new();
+    // Each value must also write as text: XML can't hold raw bytes.
+    let writes_as_text = |v: &Object| {
+        let mut out = Vec::new();
+        pdfcraft_cos::serialize(v, &mut out);
+        std::str::from_utf8(&out).is_ok()
+    };
+    for (k, v) in d.iter().filter(|(k, v)| k.starts_with(b"PC") && portable(v, 0) && writes_as_text(v)) {
+        keys.set(k.clone(), v.clone());
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    pdfcraft_cos::serialize(&Object::Dict(keys), &mut out);
+    String::from_utf8(out).ok()
+}
+
+/// The `pdfcraft:keys` of an XFDF comment back as dictionary entries: PdfCraft's keys only, with
+/// values that mean the same here. Anything malformed is skipped.
+fn read_own_keys(node: roxmltree::Node, d: &mut Dict) {
+    let Some(text) = node.attribute((PDFCRAFT_NS, "keys")).filter(|t| t.len() <= MAX_OWN_KEYS) else { return };
+    let Ok(Object::Dict(keys)) = pdfcraft_cos::Lexer::new(text.as_bytes(), 0).object() else { return };
+    for (k, v) in keys.iter().filter(|(k, v)| k.starts_with(b"PC") && portable(v, 0)) {
+        if !d.contains(k) {
+            d.set(k.clone(), v.clone());
+        }
+    }
+}
+
+/// `own`: write each comment's PdfCraft keys too (see [`own_keys`]), for a copy and paste.
+fn xfdf_annots(doc: &Document, out: &mut String, only: Option<&HashSet<(usize, usize)>>, own: bool) {
     let pages = pdfcraft_model::pages(doc);
     // NM of every annotation, for inreplyto. A selected annotation without one (other tools
     // leave /NM out) gets a name for this export, so a reply copied with it still finds it.
@@ -150,7 +200,7 @@ fn xfdf_annots(doc: &Document, out: &mut String, only: Option<&HashSet<(usize, u
                 let name = |o: &Object| o.as_name().map(|x| String::from_utf8_lossy(x).into_owned()).unwrap_or_else(|| "None".into());
                 let _ = write!(attrs, " head=\"{}\" tail=\"{}\"", esc(&name(&le[0])), esc(&name(&le[1])));
             }
-            // A callout: its leader path, text-box inset, intent and (single-name) line ending.
+            // A callout: its leader path, text-box inset and (single-name) line ending.
             let cl = nums_of(doc, d.get(b"CL"));
             if cl.len() == 4 || cl.len() == 6 {
                 let _ = write!(attrs, " callout=\"{}\"", cl.iter().map(|v| n(*v)).collect::<Vec<_>>().join(","));
@@ -158,15 +208,28 @@ fn xfdf_annots(doc: &Document, out: &mut String, only: Option<&HashSet<(usize, u
                 if rd.len() == 4 {
                     let _ = write!(attrs, " fringe=\"{}\"", rd.iter().map(|v| n(*v)).collect::<Vec<_>>().join(","));
                 }
-                if let Some(it) = d.get(b"IT").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(|x| String::from_utf8_lossy(x).into_owned())) {
-                    let _ = write!(attrs, " intent=\"{}\"", esc(&it));
-                }
                 if let Some(le) = d.get(b"LE").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(|x| String::from_utf8_lossy(x).into_owned())) {
                     let _ = write!(attrs, " head=\"{}\"", esc(&le));
                 }
             }
+            // What the comment is meant as (/IT): typewriter text, a callout, a cloud, an arrow.
+            if let Some(it) = d.get(b"IT").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(|x| String::from_utf8_lossy(x).into_owned())) {
+                let _ = write!(attrs, " intent=\"{}\"", esc(&it));
+            }
+            // A cloudy border (/BE /S /C) and how far its arcs bulge.
+            if let Some(be) =
+                d.get(b"BE").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).filter(|b| b.name(b"S") == Some(b"C".as_slice()))
+            {
+                attrs.push_str(" style=\"cloudy\"");
+                if let Some(i) = be.get(b"I").and_then(Object::as_f64) {
+                    let _ = write!(attrs, " intensity=\"{}\"", n(i));
+                }
+            }
             if let Some(irt) = d.get(b"IRT").and_then(Object::as_ref).and_then(|r| names.get(&r)) {
                 let _ = write!(attrs, " inreplyto=\"{}\"", esc(irt));
+            }
+            if own && let Some(keys) = own_keys(&d) {
+                let _ = write!(attrs, " pdfcraft:keys=\"{}\"", esc(&keys));
             }
             let _ = write!(out, "<{tag}{attrs}>");
             if let Some(c) = text_of(doc, &d, b"Contents") {
@@ -265,7 +328,7 @@ pub fn export_xfdf(doc: &Document, comments: bool, fields: bool, file: &str) -> 
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">\n");
     if comments {
         out.push_str("<annots>\n");
-        xfdf_annots(doc, &mut out, None);
+        xfdf_annots(doc, &mut out, None, false);
         out.push_str("</annots>\n");
     }
     if fields {
@@ -380,6 +443,16 @@ fn annot_from_xml(node: roxmltree::Node, subtype: &str, page_ref: ObjRef) -> Opt
             Object::Array(vec![Object::name(node.attribute("head").unwrap_or("None")), Object::name(node.attribute("tail").unwrap_or("None"))]),
         );
     }
+    if let Some(it) = node.attribute("intent").filter(|it| !it.is_empty()) {
+        d.set(b"IT".to_vec(), Object::name(it));
+    }
+    if node.attribute("style") == Some("cloudy") {
+        let mut be = Dict::new();
+        be.set(b"S".to_vec(), Object::name("C"));
+        let intensity = node.attribute("intensity").and_then(|i| i.parse::<f64>().ok()).filter(|i| i.is_finite()).unwrap_or(1.0);
+        be.set(b"I".to_vec(), Object::Real(intensity.clamp(0.0, 2.0)));
+        d.set(b"BE".to_vec(), Object::Dict(be));
+    }
     if let Some(cl) = node.attribute("callout").map(csv).filter(|c| c.len() == 4 || c.len() == 6) {
         d.set(b"CL".to_vec(), arr(&cl));
         if let Some(rd) = node.attribute("fringe").map(csv).filter(|r| r.len() == 4) {
@@ -421,6 +494,7 @@ fn annot_from_xml(node: roxmltree::Node, subtype: &str, page_ref: ObjRef) -> Opt
             _ => {}
         }
     }
+    read_own_keys(node, &mut d);
     Some(d)
 }
 

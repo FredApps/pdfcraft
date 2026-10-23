@@ -2276,3 +2276,74 @@ fn copied_marks_and_text_boxes_show_what_they_are_while_placed_and_once_pasted()
         assert!(drawn, "{:?}: {content}", d.name(b"Name"));
     }
 }
+
+/// A pasted copy is what the original was: typewriter text stays typewriter text (`/IT`) and a
+/// Fill & Sign item, a cloud keeps its cloudy border, and PdfCraft's own keys (a turned comment's
+/// `/PCBox` and `/PCAngle`) come along. A reference into the source document stays behind, and
+/// keys that aren't PdfCraft's, or a malformed attribute, are not taken from the attribute.
+#[test]
+fn copies_keep_their_intent_cloud_and_pdfcraft_keys() {
+    let mut src = blank();
+    let meta = |id: &str| Meta { date: Some("D:20261023120000Z".into()), id: id.into() };
+    let typed = Shape::Typewriter { rect: [50.0, 500.0, 150.0, 520.0], font_size: 12.0 };
+    let cloud = Shape::Polygon { vertices: vec![[200.0, 200.0], [300.0, 200.0], [250.0, 280.0]], cloud: true };
+    let square = Shape::Rectangle { rect: [100.0, 100.0, 180.0, 160.0] };
+    for (shape, id) in [(typed, "t1"), (cloud, "c1"), (square, "s1")] {
+        let new = NewAnnotation { page: 0, style: Style::default_for(&shape), shape, contents: format!("{id} text"), author: "Ada".into() };
+        add_annotation(&mut src, &new, &meta(id)).unwrap();
+    }
+    let annots = |doc: &Document, page: usize| -> Vec<Dict> {
+        let pages = pdfcraft_model::pages(doc);
+        let list = pages[page].dict.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap_or_default();
+        list.iter().filter_map(|a| doc.resolve(a).as_dict().cloned()).filter(|d| !matches!(d.name(b"Subtype"), Some(b"Popup" | b"Widget"))).collect()
+    };
+    let refs: Vec<ObjRef> = {
+        let pages = pdfcraft_model::pages(&src);
+        let list = pages[0].dict.get(b"Annots").and_then(|a| src.resolve(a).as_array().cloned()).unwrap();
+        list.iter().filter_map(Object::as_ref).collect()
+    };
+    let target = src.add(Object::Dict(Dict::new()));
+    let square_ref = *refs.iter().find(|r| src.get(**r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Square".as_slice()))).unwrap();
+    src.update_dict(square_ref, |d| {
+        d.set(b"PCBox".to_vec(), arr(&[110.0, 110.0, 170.0, 150.0]));
+        d.set(b"PCAngle".to_vec(), Object::Real(30.0));
+        d.set(b"PCElsewhere".to_vec(), Object::Ref(target));
+    })
+    .unwrap();
+    let which: Vec<(usize, usize)> = summaries(&src).iter().map(|c| (c.page, c.index)).collect();
+    let xfdf = export_xfdf_comments(&src, &which, "src.pdf");
+    assert!(xfdf.contains("intent=\"FreeTextTypeWriter\"") && xfdf.contains("style=\"cloudy\""), "{xfdf}");
+    let mut dst = blank();
+    import_comments(&mut dst, &xfdf, Some(1), Some("p"), Some([5.0, -5.0])).unwrap();
+    let copies = annots(&dst, 1);
+    assert_eq!(copies.len(), 3, "{copies:?}");
+    let typed = copies.iter().find(|d| d.name(b"Subtype") == Some(b"FreeText".as_slice())).unwrap();
+    assert_eq!(typed.name(b"IT"), Some(b"FreeTextTypeWriter".as_slice()), "{typed:?}");
+    assert!(pdfcraft_annot::is_fill_sign(&dst, typed), "still a Fill & Sign item: {typed:?}");
+    assert!(matches!(typed.get(b"PCFillSign"), Some(Object::Bool(true))), "{typed:?}");
+    let cloud = copies.iter().find(|d| d.name(b"Subtype") == Some(b"Polygon".as_slice())).unwrap();
+    assert_eq!(cloud.name(b"IT"), Some(b"PolygonCloud".as_slice()));
+    let be = cloud.get(b"BE").and_then(Object::as_dict).expect("a cloudy border");
+    assert_eq!(be.name(b"S"), Some(b"C".as_slice()));
+    assert_eq!(be.get(b"I").and_then(Object::as_f64), Some(1.0));
+    let square = copies.iter().find(|d| d.name(b"Subtype") == Some(b"Square".as_slice())).unwrap();
+    assert_eq!(square.get(b"PCAngle").and_then(Object::as_f64), Some(30.0));
+    assert!(square.get(b"PCBox").and_then(Object::as_array).is_some_and(|b| b.len() == 4));
+    assert!(square.get(b"PCElsewhere").is_none(), "a reference into the source stays behind: {square:?}");
+    // File ▸ Export comments writes the standard attributes only.
+    let exported = export_xfdf(&src, true, false, "src.pdf");
+    assert!(exported.contains("intent=\"FreeTextTypeWriter\"") && !exported.contains("pdfcraft:keys"), "{exported}");
+    // A hand-made attribute: only PdfCraft keys with values of their own are taken.
+    let crafted = format!(
+        "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xmlns:pdfcraft=\"{PDFCRAFT_NS}\"><annots>\
+         <square page=\"0\" rect=\"10,10,50,50\" pdfcraft:keys=\"&lt;&lt; /PCAngle 45 /Subtype /Ink /PCRef 3 0 R &gt;&gt;\"/>\
+         <square page=\"0\" rect=\"60,10,90,50\" pdfcraft:keys=\"&lt;&lt; /PCAngle\"/></annots></xfdf>"
+    );
+    let mut third = blank();
+    import_comments(&mut third, &crafted, Some(0), Some("q"), None).unwrap();
+    let got = annots(&third, 0);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0].get(b"PCAngle").and_then(Object::as_f64), Some(45.0));
+    assert_eq!(got[0].name(b"Subtype"), Some(b"Square".as_slice()), "not taken from the attribute");
+    assert!(got[0].get(b"PCRef").is_none() && got[1].get(b"PCAngle").is_none(), "{got:?}");
+}
