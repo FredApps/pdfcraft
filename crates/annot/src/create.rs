@@ -412,7 +412,7 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
 }
 
 fn validate_style(style: &Style) -> Result<(), AnnotError> {
-    if !finite(&style.color) || !style.opacity.is_finite() || !style.width.is_finite() {
+    if !finite(&style.color) || style.border_color.is_some_and(|c| !finite(&c)) || !style.opacity.is_finite() || !style.width.is_finite() {
         return Err(AnnotError::Invalid("invalid style".into()));
     }
     Ok(())

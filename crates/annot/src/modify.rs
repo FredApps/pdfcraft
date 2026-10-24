@@ -495,8 +495,10 @@ fn apply_text_box(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta, ne
     }
 }
 
+/// The border width as the appearance draws it: `/BS /W`, else the third number of `/Border`
+/// (another app's), else 1.
 fn border_width_of(d: &Dict) -> f64 {
-    d.get(b"BS").and_then(|b| b.as_dict()).and_then(|b| b.get(b"W")).and_then(|w| w.as_f64()).unwrap_or(1.0).max(0.0)
+    appearance::border_width(d)
 }
 
 /// Change a comment's colour, opacity, line width and/or line endings, and redraw it.

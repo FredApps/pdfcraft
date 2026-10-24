@@ -340,8 +340,16 @@ impl PdfCraftApp {
                     s.fill = fill;
                     self.comment_prefs.set_style(tool, s);
                 }
-                if let Some(c) = rgb_triple(&e["border_color"]) {
-                    self.comment_prefs.set_border_color(tool, Some(c));
+                // `"border_color": null` is a saved "Same as text", which clears a tool's own border
+                // colour; a missing or malformed one keeps it.
+                match e.get("border_color") {
+                    Some(serde_json::Value::Null) => self.comment_prefs.set_border_color(tool, None),
+                    Some(c) => {
+                        if let Some(c) = rgb_triple(c) {
+                            self.comment_prefs.set_border_color(tool, Some(c));
+                        }
+                    }
+                    None => {}
                 }
             }
         }

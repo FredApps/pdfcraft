@@ -589,6 +589,29 @@ fn a_typewriter_border_goes_around_its_text_which_stays_put() {
     let b = add_annotation(&mut doc, &new(1, shape), &meta("b")).unwrap();
     set_style(&mut doc, 1, b, None, None, Some(3.0), None, &meta("")).unwrap();
     assert_eq!(rect(&list(&doc, 1)[b]), [100.0, 600.0, 200.0, 650.0], "a text box keeps the box it was drawn with");
+    // Another app's typed text with its width in /Border (no /BS): 4 pt, so 2 pt shrinks the box
+    // by 2 on every side, as it is drawn.
+    let shape = Shape::Typewriter { rect: [100.0, 500.0, 200.0, 530.0], font_size: 11.0 };
+    let o = add_annotation(
+        &mut doc,
+        &NewAnnotation { page: 1, style: Style::default_for(&shape), shape: shape.clone(), contents: "Bo".into(), author: "Ada".into() },
+        &meta("o"),
+    )
+    .unwrap();
+    let (_, r) = annot_ref(&mut doc, 1, o).unwrap();
+    doc.update_dict(r, |d| {
+        d.remove(b"BS");
+        d.set(b"Border".to_vec(), num_array(&[0.0, 0.0, 4.0]));
+    })
+    .unwrap();
+    set_style(&mut doc, 1, o, None, None, Some(2.0), None, &meta("")).unwrap();
+    assert_eq!(rect(&list(&doc, 1)[o]), [102.0, 502.0, 198.0, 528.0], "the imported 4 pt border is read from /Border");
+    // A border colour that isn't a colour is refused before anything is written.
+    let mut bad = NewAnnotation { page: 1, style: Style::default_for(&shape), shape, contents: "x".into(), author: "Ada".into() };
+    bad.style.border_color = Some([f64::NAN, 0.0, 0.0]);
+    let before = list(&doc, 1).len();
+    assert!(matches!(add_annotation(&mut doc, &bad, &meta("n")), Err(AnnotError::Invalid(_))));
+    assert_eq!(list(&doc, 1).len(), before);
 }
 
 /// Text keeps its colour and the border gets its own: the stroking colour in `/DA`, which a new
