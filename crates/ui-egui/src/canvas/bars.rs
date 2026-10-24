@@ -470,10 +470,19 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         // Default on typed text keeps it.
                         let selected = selected_text(app).and_then(|(page, annotation)| {
                             let p = app.active_ids().and_then(|(_, id)| app.session.get(id))?.comment_props(page, annotation)?;
-                            Some((page, annotation, crate::fill_sign::TextBorder { width: p.width.unwrap_or(0.0), color: p.border_color }))
+                            let own = crate::fill_sign::TextBorder {
+                                width: p.width.unwrap_or(0.0),
+                                color: p.border_color,
+                                shape: p.border_shape.unwrap_or_default(),
+                            };
+                            Some((page, annotation, own))
                         });
                         let was = selected.map_or(
-                            crate::fill_sign::TextBorder { width: app.fill_text_border, color: app.fill_text_border_color },
+                            crate::fill_sign::TextBorder {
+                                width: app.fill_text_border,
+                                color: app.fill_text_border_color,
+                                shape: app.fill_text_border_shape,
+                            },
                             |(_, _, own)| own,
                         );
                         let mut border = was;
@@ -496,6 +505,19 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         {
                             border.color = color;
                         }
+                        // Its shape: an oval or a circle goes around the text, which keeps its place.
+                        if was.width > 0.0 {
+                            egui::ComboBox::from_id_salt("fill-text-border-shape")
+                                .selected_text(tl!(was.shape.name()))
+                                .width(96.0)
+                                .show_ui(ui, |ui| {
+                                    for shape in pdfcraft_engine::BorderShape::ALL {
+                                        ui.selectable_value(&mut border.shape, shape, tl!(shape.name()));
+                                    }
+                                })
+                                .response
+                                .on_hover_text(tl!("Border shape"));
+                        }
                         match selected {
                             Some((page, index, _)) => {
                                 if border.width != was.width {
@@ -511,10 +533,14 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                                 if border.color != was.color {
                                     app.apply_edit(Edit::BorderColorAnnotation { page, index, color: border.color });
                                 }
+                                if border.shape != was.shape {
+                                    app.apply_edit(Edit::BorderShapeAnnotation { page, index, shape: border.shape });
+                                }
                             }
                             None => {
                                 app.fill_text_border = border.width;
                                 app.fill_text_border_color = border.color;
+                                app.fill_text_border_shape = border.shape;
                             }
                         }
                     }

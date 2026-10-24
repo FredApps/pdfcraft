@@ -107,8 +107,9 @@ impl PdfCraftApp {
                 self.fill_text_size = size;
             }
             let width = p.width.and_then(crate::fill_sign::valid_text_border).unwrap_or(0.0);
-            self.fill_text_default = crate::fill_sign::TextBorder { width, color: p.border_color };
-            (self.fill_text_border, self.fill_text_border_color) = (width, p.border_color);
+            let border = crate::fill_sign::TextBorder { width, color: p.border_color, shape: p.border_shape.unwrap_or_default() };
+            self.fill_text_default = border;
+            (self.fill_text_border, self.fill_text_border_color, self.fill_text_border_shape) = (border.width, border.color, border.shape);
             self.notify_fmt("New {tool} comments will look like this one", &[("tool", &kind)]);
             return;
         }
@@ -123,6 +124,9 @@ impl PdfCraftApp {
         self.comment_prefs.set_style(tool, style);
         // A text box's or callout's own border colour (cleared for tools that have none).
         self.comment_prefs.set_border_color(tool, p.border_color);
+        if let Some(shape) = p.border_shape {
+            self.comment_prefs.set_border_shape(tool, shape);
+        }
         // Keep invisible defaults out of tools where a zero stroke would make them disappear.
         self.comment_prefs.set_opacity(tool, p.opacity);
         if let Some(w) = p.width {
@@ -165,6 +169,12 @@ pub fn edits(d: &PropsDraft) -> Vec<Edit> {
     }
     if e.restylable && e.font_size.is_some() && e.border_color != o.border_color {
         out.push(Edit::BorderColorAnnotation { page: d.page, index: d.index, color: e.border_color });
+    }
+    // After the width (StyleAnnotation), whose border the shape goes around.
+    if e.restylable
+        && let Some(shape) = e.border_shape.filter(|s| Some(*s) != o.border_shape)
+    {
+        out.push(Edit::BorderShapeAnnotation { page: d.page, index: d.index, shape });
     }
     let author = (e.author != o.author).then(|| e.author.clone());
     let subject = (e.subject != o.subject).then(|| e.subject.clone());
@@ -245,6 +255,20 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
                                 e.border_color = c;
                             }
                         });
+                        ui.end_row();
+                    }
+                    // Text boxes and typewriter text: an oval or a circle goes around the text.
+                    if let Some(shape) = e.border_shape.as_mut() {
+                        let label = ui.label(tl!("Border shape"));
+                        egui::ComboBox::from_id_salt("border-shape")
+                            .selected_text(tl!(shape.name()))
+                            .show_ui(ui, |ui| {
+                                for s in pdfcraft_engine::BorderShape::ALL {
+                                    ui.selectable_value(shape, s, tl!(s.name()));
+                                }
+                            })
+                            .response
+                            .labelled_by(label.id);
                         ui.end_row();
                     }
                     if e.fillable {

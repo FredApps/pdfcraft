@@ -215,6 +215,8 @@ pub struct Props {
     pub font_size: Option<f64>,
     /// Text boxes, typewriter text and callouts: the border's own colour (`None`: the text's).
     pub border_color: Option<Rgb>,
+    /// Text boxes and typewriter text: the border's shape (callouts have none to choose).
+    pub border_shape: Option<BorderShape>,
 }
 
 /// The current properties of the comment at `(page, index)`.
@@ -247,6 +249,7 @@ pub fn props(doc: &Document, page: usize, index: usize) -> Option<Props> {
         fill: fill_of(d),
         font_size: (subtype == "FreeText").then(|| appearance::parse_da(d).1),
         border_color: (subtype == "FreeText").then(|| appearance::da_border(d)).flatten(),
+        border_shape: (subtype == "FreeText" && !d.contains(b"CL")).then(|| BorderShape::of(d)),
         subtype,
         endings: line_endings_of(d),
     })

@@ -164,11 +164,12 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
     let rect = nums(b"Rect").filter(|v| v.len() == 4 && v.iter().all(|x| x.is_finite()))?;
     let rect = [rect[0], rect[1], rect[2], rect[3]];
     // A callout re-fits its text box (`/Rect` inset by `/RD`); the leader line keeps its place.
+    // So does a text box inside an oval or a circle.
     let tb = if d.contains(b"CL") {
         let rd = nums(b"RD").filter(|v| v.len() == 4 && v.iter().all(|x| *x >= 0.0))?;
         [rect[0] + rd[0], rect[1] + rd[1], rect[2] - rd[2], rect[3] - rd[3]]
     } else {
-        rect
+        text_box_of(&d).unwrap_or(rect)
     };
     let (x0, top) = (tb[0].min(tb[2]), tb[1].max(tb[3]));
     let w = tb[2] - tb[0];
@@ -355,7 +356,61 @@ pub fn set_rect(doc: &mut Document, page: usize, index: usize, rect: [f64; 4], m
     if !matches!(subtype.as_str(), "Square" | "Circle" | "FreeText") {
         return Err(AnnotError::Invalid(format!("{subtype} comments can't be resized")));
     }
+    // An oval's or a circle's frame is resized: its text box follows inside.
+    let shape = if subtype == "FreeText" { BorderShape::of(&d) } else { BorderShape::Rectangle };
+    let rect = match (shape, text_box_of(&d)) {
+        (BorderShape::Rectangle, _) | (_, None) => rect,
+        (shape, Some(was)) => shape.inside(rect, border_width_of(&d), was),
+    };
     apply_text_box(doc, r, rect, meta, false)
+}
+
+/// A FreeText's text box: `/Rect` inset by `/RD` for a callout or a text box inside an oval or a
+/// circle, else `/Rect`. `None` when they can't be read.
+fn text_box_of(d: &Dict) -> Option<[f64; 4]> {
+    let nums = |key: &[u8]| -> Option<Vec<f64>> { d.get(key)?.as_array()?.iter().map(|o| o.as_f64()).collect() };
+    let rect = normalize(four(&nums(b"Rect")?)?);
+    if !d.contains(b"CL") && BorderShape::of(d) == BorderShape::Rectangle {
+        return Some(rect);
+    }
+    let rd = nums(b"RD").filter(|v| v.len() == 4 && v.iter().all(|x| x.is_finite() && *x >= 0.0))?;
+    let tb = [rect[0] + rd[0], rect[1] + rd[1], rect[2] - rd[2], rect[3] - rd[3]];
+    (tb[2] - tb[0] >= 1.0 && tb[3] - tb[1] >= 1.0).then_some(tb)
+}
+
+/// Give text box or typewriter text `d`, whose text box is `tb`, the border `shape` (`width`
+/// wide): `/Rect` around it, `/RD` and `/PCBorderShape`, or for a rectangle `/Rect` the text
+/// box itself again.
+fn shape_text_box(d: &mut Dict, tb: [f64; 4], shape: BorderShape, width: f64) {
+    let outer = shape.around(tb, width);
+    d.set(b"Rect".to_vec(), num_array(&outer));
+    if shape == BorderShape::Rectangle {
+        d.remove(b"PCBorderShape");
+        d.remove(b"RD");
+    } else {
+        d.set(b"PCBorderShape".to_vec(), Object::name(shape.name()));
+        let tb = normalize(tb);
+        d.set(b"RD".to_vec(), num_array(&[tb[0] - outer[0], tb[1] - outer[1], outer[2] - tb[2], outer[3] - tb[3]]));
+    }
+}
+
+/// Give a text box or typewriter text an oval, a circle or a rectangle for its border, and redraw
+/// it. Its text box keeps its place; the oval or circle goes around it.
+pub fn set_border_shape(doc: &mut Document, page: usize, index: usize, shape: BorderShape, meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let d = annot_dict(doc, r);
+    if d.name(b"Subtype") != Some(b"FreeText") || d.contains(b"CL") {
+        return Err(AnnotError::Invalid("only text boxes and typewriter text have a border shape".into()));
+    }
+    let tb = text_box_of(&d).ok_or_else(|| AnnotError::Invalid("the text box can't be read".into()))?;
+    refuse_foreign_text(doc, &d)?;
+    let before = d;
+    doc.update_dict(r, |d| {
+        shape_text_box(d, tb, shape, border_width_of(d));
+        touch(d, meta);
+    })?;
+    redraw_or_restore(doc, r, before)
 }
 
 /// At most this many points reshape a comment (a drawn polygon has a handful).
@@ -470,6 +525,8 @@ fn apply_text_box(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta, ne
         }
         None => (rect, None),
     };
+    let (shape, width) = (BorderShape::of(&d), border_width_of(&d));
+    let free_text = d.name(b"Subtype") == Some(b"FreeText");
     doc.update_dict(r, |d| {
         d.set(b"Rect".to_vec(), num_array(&outer));
         match &cl {
@@ -477,6 +534,8 @@ fn apply_text_box(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta, ne
                 d.set(b"CL".to_vec(), num_array(l));
                 d.set(b"RD".to_vec(), num_array(&[rect[0] - outer[0], rect[1] - outer[1], outer[2] - rect[2], outer[3] - rect[3]]));
             }
+            // An oval or a circle goes around the text box again.
+            None if free_text => shape_text_box(d, rect, shape, width),
             None => {
                 d.remove(b"RD");
             }
@@ -526,17 +585,18 @@ pub fn set_style(doc: &mut Document, page: usize, index: usize, change: StyleCha
     let free_text = subtype == "FreeText";
     // Typewriter text has no box of its own: a border goes around its text, so the box grows
     // (or shrinks) by the change on every side and the text keeps its place and its lines.
-    let typewriter = free_text && d.name(b"IT") == Some(b"FreeTextTypeWriter") && !d.contains(b"CL");
+    // So does a text box inside an oval or a circle, which goes around it again.
+    let shape = if free_text { BorderShape::of(&d) } else { BorderShape::Rectangle };
+    let typewriter = free_text && (d.name(b"IT") == Some(b"FreeTextTypeWriter") || shape != BorderShape::Rectangle) && !d.contains(b"CL");
     let regrow = width.filter(|_| typewriter).and_then(|w| {
         let by = w.max(0.0) - if d.contains(b"BS") || d.contains(b"Border") { border_width_of(&d) } else { 0.0 };
-        let rect: Vec<f64> = d.get(b"Rect")?.as_array()?.iter().filter_map(|o| o.as_f64()).collect();
-        let rect = grow(normalize(four(&rect)?), by);
-        (by != 0.0 && finite(&rect) && rect[2] - rect[0] >= 1.0 && rect[3] - rect[1] >= 1.0).then_some(rect)
+        let rect = grow(text_box_of(&d)?, by);
+        (by != 0.0 && finite(&rect) && rect[2] - rect[0] >= 1.0 && rect[3] - rect[1] >= 1.0).then_some((rect, w.max(0.0)))
     });
     let before = d;
     doc.update_dict(r, |d| {
-        if let Some(rect) = regrow {
-            d.set(b"Rect".to_vec(), num_array(&rect));
+        if let Some((rect, w)) = regrow {
+            shape_text_box(d, rect, shape, w);
         }
         if let Some(c) = color {
             if free_text {
@@ -632,10 +692,8 @@ pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, m
     let result = match fitted_box(doc, r, &text) {
         Some(fit) => {
             let cur = annot_dict(doc, r);
-            let nums: Vec<f64> =
-                cur.get(b"Rect").and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
             // Keep the top and sides; only the bottom edge moves, and only downwards.
-            match four(&nums).map(normalize) {
+            match text_box_of(&cur) {
                 Some(old) if !cur.contains(b"CL") => apply_text_box(doc, r, [fit[0], fit[1].min(old[1]), fit[2], fit[3]], meta, false),
                 _ => apply_text_box(doc, r, fit, meta, false),
             }

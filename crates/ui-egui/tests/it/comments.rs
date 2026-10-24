@@ -1205,6 +1205,42 @@ fn shapes_take_a_fill_colour_from_the_quick_bar_and_properties() {
     assert_eq!(h.state().comment_prefs.style(CommentTool::Rectangle).fill, Some([0.0, 0.0, 1.0]));
 }
 
+/// Comment Properties ▸ Border shape puts an oval or a circle around a text box's text; a
+/// callout has none to choose. Make Properties Default carries it into the Text box tool.
+#[test]
+fn text_box_properties_choose_the_border_shape() {
+    use pdfcraft_engine::BorderShape;
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let mut h = harness(|_| {});
+    let shape = pdfcraft_engine::Shape::TextBox { rect: [40.0, 120.0, 200.0, 160.0], font_size: 12.0 };
+    let mut style = pdfcraft_engine::Style::default_for(&shape);
+    style.width = 1.0;
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+        page: 0,
+        shape,
+        style,
+        contents: "Pos. 3".into(),
+        author: "Tester".into(),
+    })));
+    h.run_steps(2);
+    h.state_mut().open_comment_props(0, 0);
+    h.run_steps(2);
+    h.get_by_label("Border shape");
+    {
+        let d = h.state_mut().comment_props.as_mut().expect("open");
+        assert_eq!(d.original.border_shape, Some(BorderShape::Rectangle));
+        d.edited.border_shape = Some(BorderShape::Oval);
+        d.make_default = true;
+    }
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.comment_props(0, 0).unwrap().border_shape, Some(BorderShape::Oval));
+    assert_eq!(doc.can_undo(), Some("Change comment properties"));
+    assert_eq!(s.comment_prefs.style(CommentTool::TextBox).border_shape, BorderShape::Oval, "the default for new text boxes");
+}
+
 #[test]
 fn the_panel_filters_and_sorts() {
     let mut h = harness(|app| {

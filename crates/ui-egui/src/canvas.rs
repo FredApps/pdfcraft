@@ -3070,7 +3070,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         visible_pages: &visible_pages,
         y_shift,
         fill_text_size: app.fill_text_size,
-        fill_text_border: crate::fill_sign::TextBorder { width: app.fill_text_border, color: app.fill_text_border_color },
+        fill_text_border: crate::fill_sign::TextBorder { width: app.fill_text_border, color: app.fill_text_border_color, shape: app.fill_text_border_shape },
         today,
     };
     let mut page_out = PageOut::default();

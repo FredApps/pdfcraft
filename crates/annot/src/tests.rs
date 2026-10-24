@@ -40,7 +40,7 @@ fn new(page: usize, shape: Shape) -> NewAnnotation {
     NewAnnotation {
         page,
         shape,
-        style: Style { color: [0.0, 0.4, 1.0], opacity: 1.0, width: 2.0, fill: None, border_color: None },
+        style: Style { color: [0.0, 0.4, 1.0], opacity: 1.0, width: 2.0, fill: None, border_color: None, ..Style::default() },
         contents: "hello".into(),
         author: "Ada".into(),
     }
@@ -326,6 +326,94 @@ fn restyle_and_resize_redraw_the_appearance() {
     )
     .unwrap();
     assert!(matches!(set_rect(&mut doc, 0, l, [0.0, 0.0, 5.0, 5.0], &meta("")), Err(AnnotError::Invalid(_))));
+}
+
+/// Typed text or a text box takes an oval or a circle for its border: the text box keeps its
+/// place and the shape goes around it (`/Rect` grows, `/RD` holds the text box, `/PCBorderShape`
+/// the shape); back to a rectangle, it is the text box it was. A resized frame takes its text box
+/// along, a thicker border leaves it where it is.
+#[test]
+fn text_boxes_take_an_oval_or_a_circle_around_their_text() {
+    let close = |a: &[f64], b: &[f64]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.01);
+    let nums = |d: &Dict, k: &[u8]| -> Vec<f64> {
+        d.get(k).and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default()
+    };
+    // Where the text starts: its first line's text matrix.
+    let text_at = |doc: &Document, d: &Dict| ap_content(doc, d).lines().find(|l| l.ends_with(" Tm") || l.contains(" Tm ")).map(str::to_owned);
+    let mut doc = fixture();
+    let mut tw = new(0, Shape::Typewriter { rect: [100.0, 100.0, 200.0, 120.0], font_size: 10.0 });
+    tw.style.width = 1.0;
+    let t = add_annotation(&mut doc, &tw, &meta("t")).unwrap();
+    // In an oval or a circle the text is centred in its text box (left-aligned in a box): one
+    // line of "hello" at 10 pt in the 100 × 20 text box centred on (150, 110), 3 pt from its top.
+    let centred = format!("1 0 0 1 {} {} Tm (hello) Tj", n(150.0 - appearance::text_width("hello", 10.0) / 2.0), n(107.0));
+    assert!(text_at(&doc, &list(&doc, 0)[t]).is_some_and(|l| l.starts_with("1 0 0 1 103 ")), "a box: left-aligned");
+    set_border_shape(&mut doc, 0, t, BorderShape::Oval, &meta("")).unwrap();
+    let doc2 = reopen(&doc);
+    let d = &list(&doc2, 0)[t];
+    // Around the 100 × 20 text box, centred: √2 its size, two points more for the 1 pt border.
+    let (ax, ay) = (50.0 * std::f64::consts::SQRT_2 + 2.0, 10.0 * std::f64::consts::SQRT_2 + 2.0);
+    assert!(close(&rect(d), &[150.0 - ax, 110.0 - ay, 150.0 + ax, 110.0 + ay]), "{:?}", rect(d));
+    assert!(close(&nums(d, b"RD"), &[ax - 50.0, ay - 10.0, ax - 50.0, ay - 10.0]), "{:?}", nums(d, b"RD"));
+    assert_eq!(d.name(b"PCBorderShape"), Some(&b"Oval"[..]));
+    let ap = ap_content(&doc2, d);
+    assert!(ap.contains(" c\n") && ap.contains("S\n") && !ap.contains("re S"), "an oval, not a box: {ap}");
+    assert_eq!(text_at(&doc2, d).as_deref(), Some(centred.as_str()), "the text keeps its place");
+    assert_eq!(props(&doc2, 0, t).unwrap().border_shape, Some(BorderShape::Oval));
+    // A circle through the text box's corners.
+    set_border_shape(&mut doc, 0, t, BorderShape::Circle, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    let r = 50.0f64.hypot(10.0) + 2.0;
+    assert!(close(&rect(d), &[150.0 - r, 110.0 - r, 150.0 + r, 110.0 + r]), "{:?}", rect(d));
+    assert_eq!(text_at(&doc, d).as_deref(), Some(centred.as_str()));
+    // A thicker border: the typed text's box grows by the change on every side, so its text keeps
+    // its place inside the thicker line (as with a rectangle), and the circle goes around that.
+    set_style(&mut doc, 0, t, None, None, Some(3.0), None, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text_at(&doc, d).as_deref(), Some(centred.as_str()));
+    let r3 = 52.0f64.hypot(12.0) + 4.0;
+    assert!(close(&rect(d), &[150.0 - r3, 110.0 - r3, 150.0 + r3, 110.0 + r3]), "{:?}", rect(d));
+    // Its frame resized: the text box follows inside, as large as the circle holds.
+    set_rect(&mut doc, 0, t, [150.0 - 2.0 * r3, 110.0 - 2.0 * r3, 150.0 + 2.0 * r3, 110.0 + 2.0 * r3], &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    let rd = nums(d, b"RD");
+    let tb = [rect(d)[0] + rd[0], rect(d)[1] + rd[1], rect(d)[2] - rd[2], rect(d)[3] - rd[3]];
+    assert!(((tb[2] - tb[0]) / (tb[3] - tb[1]) - 52.0 / 12.0).abs() < 0.01, "the text box keeps its proportions: {tb:?}");
+    assert!(close(&rect(d), &[150.0 - 2.0 * r3, 110.0 - 2.0 * r3, 150.0 + 2.0 * r3, 110.0 + 2.0 * r3]), "{:?}", rect(d));
+    // A rectangle again: the text box it has, nothing around it.
+    set_border_shape(&mut doc, 0, t, BorderShape::Rectangle, &meta("")).unwrap();
+    let d = &list(&doc, 0)[t];
+    assert!(close(&rect(d), &tb), "{:?} vs {tb:?}", rect(d));
+    assert!(!d.contains(b"RD") && !d.contains(b"PCBorderShape"));
+    assert!(ap_content(&doc, d).contains("re S"));
+
+    // A filled text box made with an oval: the background takes the shape too.
+    let mut tb = new(0, Shape::TextBox { rect: [300.0, 500.0, 400.0, 540.0], font_size: 12.0 });
+    (tb.style.fill, tb.style.width, tb.style.border_shape) = (Some([1.0, 1.0, 0.6]), 1.0, BorderShape::Oval);
+    let b = add_annotation(&mut doc, &tb, &meta("b")).unwrap();
+    let d = &list(&doc, 0)[b];
+    assert_eq!(d.name(b"PCBorderShape"), Some(&b"Oval"[..]));
+    let ap = ap_content(&doc, d);
+    assert!(ap.contains("1 1 0.6 rg") && ap.contains(" c\nh\nf\n") && !ap.contains(" re f"), "{ap}");
+    // A callout's border stays a rectangle.
+    let c = add_annotation(
+        &mut doc,
+        &new(
+            0,
+            Shape::Callout {
+                rect: [300.0, 300.0, 400.0, 340.0],
+                knee: [280.0, 320.0],
+                point: [250.0, 280.0],
+                ending: LineEnding::OpenArrow,
+                font_size: 10.0,
+            },
+        ),
+        &meta("c"),
+    )
+    .unwrap();
+    assert!(matches!(set_border_shape(&mut doc, 0, c, BorderShape::Oval, &meta("")), Err(AnnotError::Invalid(_))));
+    assert_eq!(props(&doc, 0, c).unwrap().border_shape, None);
+    assert_eq!(BorderShape::parse("CIRCLE"), Some(BorderShape::Circle));
 }
 
 #[test]
@@ -924,8 +1012,8 @@ fn cloud_ys(path: &str) -> Vec<f64> {
 fn replace_text_groups_a_strikeout_and_a_caret() {
     let mut doc = fixture();
     let quads = [[100.0, 720.0, 200.0, 720.0, 100.0, 706.0, 200.0, 706.0]];
-    let red = Style { color: [0.89, 0.13, 0.13], opacity: 1.0, width: 1.0, fill: None, border_color: None };
-    let blue = Style { color: [0.0, 0.47, 0.84], opacity: 1.0, width: 1.0, fill: None, border_color: None };
+    let red = Style { color: [0.89, 0.13, 0.13], opacity: 1.0, width: 1.0, fill: None, border_color: None, ..Style::default() };
+    let blue = Style { color: [0.0, 0.47, 0.84], opacity: 1.0, width: 1.0, fill: None, border_color: None, ..Style::default() };
     let i = add_text_replacement(
         &mut doc,
         TextReplacement {

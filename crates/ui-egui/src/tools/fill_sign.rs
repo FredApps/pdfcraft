@@ -5,7 +5,7 @@
 
 use egui::{Color32, CornerRadius, Pos2, Sense, Stroke, pos2, vec2};
 use pdfcraft_engine::signature_scan::{DEFAULT_SENSITIVITY, PREVIEW_MAX_SIDE, SCAN_MAX_SIDE, ScanError};
-use pdfcraft_engine::{Edit, FillMark, NewAnnotation, PhotoRect, Rgb, Shape, SignatureImage, SignaturePhoto, Style, Turn};
+use pdfcraft_engine::{BorderShape, Edit, FillMark, NewAnnotation, PhotoRect, Rgb, Shape, SignatureImage, SignaturePhoto, Style, Turn};
 use pdfcraft_render::{DocInfo, PageInfo};
 
 use crate::canvas::{DocView, PageToolContext, PageXform};
@@ -217,16 +217,17 @@ pub struct TypeBox {
     pub focus: bool,
 }
 
-/// The border around typed text: its width in points (0: none) and its own colour (`None`: the
-/// text's).
+/// The border around typed text: its width in points (0: none), its own colour (`None`: the
+/// text's) and its shape (an oval or a circle goes around the text).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextBorder {
     pub width: f64,
     pub color: Option<Rgb>,
+    pub shape: BorderShape,
 }
 
 impl TextBorder {
-    pub const NONE: Self = Self { width: 0.0, color: None };
+    pub const NONE: Self = Self { width: 0.0, color: None, shape: BorderShape::Rectangle };
 }
 
 /// The default size Fill & Sign uses for typed text.
@@ -264,7 +265,12 @@ pub fn typed(page: usize, at: [f64; 2], text: &str, size: f64, border: TextBorde
     let width = valid_text_border(border.width).unwrap_or(0.0);
     let [x0, y0, x1, y1] = crate::comments::text_box_rect(at, text, size, rotation);
     let shape = Shape::Typewriter { rect: [x0 - width, y0 - width, x1 + width, y1 + width], font_size: size };
-    let style = Style { width, border_color: border.color.filter(|_| width > 0.0), ..Style::default_for(&shape) };
+    let style = Style {
+        width,
+        border_color: border.color.filter(|_| width > 0.0),
+        border_shape: if width > 0.0 { border.shape } else { BorderShape::Rectangle },
+        ..Style::default_for(&shape)
+    };
     Edit::AddAnnotation(NewAnnotation { page, shape, style, contents: text.to_string(), author: author.to_string() })
 }
 
@@ -586,7 +592,18 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
             if t.border.width > 0.0 {
                 let w = (t.border.width as f32 * zoom).max(1.0);
                 let color = t.border.color.map_or(Color32::BLACK, crate::comments::color32);
-                ui.painter().rect_stroke(r.rect, 0.0, Stroke::new(w, color), egui::StrokeKind::Outside);
+                match t.border.shape {
+                    BorderShape::Rectangle => {
+                        ui.painter().rect_stroke(r.rect, 0.0, Stroke::new(w, color), egui::StrokeKind::Outside);
+                    }
+                    // An oval or a circle around it, as it will be drawn (half the line outside).
+                    shape => {
+                        let b = r.rect.expand(w);
+                        let o = shape.around([b.min.x, b.min.y, b.max.x, b.max.y].map(f64::from), f64::from(w));
+                        let half = egui::vec2((o[2] - o[0]) as f32 / 2.0 - w / 2.0, (o[3] - o[1]) as f32 / 2.0 - w / 2.0);
+                        ui.painter().add(egui::Shape::ellipse_stroke(r.rect.center(), half, Stroke::new(w, color)));
+                    }
+                }
             }
             if t.focus {
                 r.request_focus();

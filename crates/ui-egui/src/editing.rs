@@ -656,6 +656,7 @@ fn comment_page(edit: &Edit) -> Option<usize> {
         | Edit::FillAnnotation { page, .. }
         | Edit::FontSizeAnnotation { page, .. }
         | Edit::BorderColorAnnotation { page, .. }
+        | Edit::BorderShapeAnnotation { page, .. }
         | Edit::SetAnnotationInfo { page, .. } => Some(*page),
         _ => None,
     }

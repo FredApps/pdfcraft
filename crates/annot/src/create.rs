@@ -379,6 +379,10 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             }
             border(&mut d);
             rich_text(&mut d);
+            // An oval or a circle goes around the text box.
+            if !matches!(new.shape, Shape::Callout { .. }) {
+                shape_text_box(&mut d, rect, style.border_shape, style.width);
+            }
             // The text is laid out for the page as displayed, like a stamp's label.
             if !matches!(new.shape, Shape::Callout { .. }) {
                 let turn = pdfcraft_model::pages(doc).get(new.page).map_or(0, |p| p.rotation(doc));

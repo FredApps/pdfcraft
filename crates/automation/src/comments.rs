@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use pdfcraft_engine::{Edit, LineEnding, Markup, NewAnnotation, NoteIcon, ReviewState, Rgb, Shape, StampGroup, StampKind, Style, SummarySort};
+use pdfcraft_engine::{
+    BorderShape, Edit, LineEnding, Markup, NewAnnotation, NoteIcon, ReviewState, Rgb, Shape, StampGroup, StampKind, Style, SummarySort,
+};
 use pdfcraft_render::{Annotation, PageInfo};
 use serde_json::{Value, json};
 
@@ -189,6 +191,12 @@ impl Automation {
                 "rect": crate::view_rect(&doc.info, c.page, c.shown_rect(doc.info.pages.get(c.page).map_or(0, |p| p.rotation))),
                 "color": c.color.map(hex),
             });
+            // A text box's or typed text's oval or circle (a rectangle is not reported).
+            if c.subtype == "FreeText"
+                && let Some(shape) = doc.comment_props(c.page, c.index).and_then(|p| p.border_shape).filter(|s| *s != BorderShape::Rectangle)
+            {
+                v["border_shape"] = json!(shape.name().to_ascii_lowercase());
+            }
             // A line's ends, or the corners of connected lines, a polygon or a cloud, as
             // comment_edit's `points` takes them.
             // Unchanged on a page the viewer could not read, as `rect` is.
@@ -427,6 +435,12 @@ impl Automation {
         if let Some(w) = a.opt_num("width")? {
             style.width = w.max(0.0);
         }
+        if let Some(b) = border_shape(a)? {
+            if !matches!(shape, Shape::TextBox { .. } | Shape::Typewriter { .. }) {
+                return Err(ToolError::InvalidArgs("border_shape is for a text box or typewriter text".into()));
+            }
+            style.border_shape = b;
+        }
         let contents = a.opt_str("contents")?.unwrap_or_default().to_string();
         let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
         // Replace Text: the struck-out text and a grouped caret holding `contents`.
@@ -487,6 +501,7 @@ impl Automation {
     }
 
     pub(crate) fn fill_sign_add(&mut self, a: &Args) -> Result<Value> {
+        let border_shape = border_shape(a)?;
         use pdfcraft_engine::FillMark;
         let page = self.page(a)?;
         let info = self.doc(a)?.info.pages[page].clone();
@@ -521,6 +536,9 @@ impl Automation {
         let border_color = a.opt_str("border_color")?.map(parse_color).transpose()?;
         if border_color.is_some() && border <= 0.0 {
             return Err(ToolError::InvalidArgs("border_color needs a border".into()));
+        }
+        if border_shape.is_some() && !matches!(kind, "text" | "date") {
+            return Err(ToolError::InvalidArgs("border_shape is only for type text or date".into()));
         }
         if let Some(path) = a.opt_str("path")? {
             if !matches!(kind, "signature" | "initials") || a.opt_str("text")?.is_some() {
@@ -596,6 +614,7 @@ impl Automation {
         if matches!(shape, Shape::Typewriter { .. }) {
             style.width = border;
             style.border_color = border_color;
+            style.border_shape = border_shape.unwrap_or_default();
         }
         self.apply(a, Edit::AddAnnotation(NewAnnotation { page, shape, style, contents, author }))
     }
@@ -667,6 +686,9 @@ impl Automation {
             let color = if c.eq_ignore_ascii_case("text") { None } else { Some(parse_color(c)?) };
             edits.push(Edit::BorderColorAnnotation { page, index, color });
         }
+        if let Some(shape) = border_shape(a)? {
+            edits.push(Edit::BorderShapeAnnotation { page, index, shape });
+        }
         if let Some(size) = a.opt_num("font_size")? {
             if !(1.0..=400.0).contains(&size) {
                 return Err(ToolError::InvalidArgs("font_size must be 1–400 pt".into()));
@@ -700,7 +722,7 @@ impl Automation {
         }
         if edits.is_empty() {
             return Err(ToolError::InvalidArgs(
-                "nothing to change: pass contents, color, opacity, width, fill, border_color, font_size, rect, move or points".into(),
+                "nothing to change: pass contents, color, opacity, width, fill, border_color, border_shape, font_size, rect, move or points".into(),
             ));
         }
         let edit = if edits.len() == 1 { edits.remove(0) } else { Edit::Batch { label: "Edit comment".into(), edits } };
@@ -753,6 +775,13 @@ impl Automation {
         };
         self.apply(a, edit)
     }
+}
+
+/// `border_shape`: `rectangle`, `oval` or `circle`.
+fn border_shape(a: &Args) -> Result<Option<BorderShape>> {
+    a.opt_str("border_shape")?
+        .map(|s| BorderShape::parse(s).ok_or_else(|| ToolError::InvalidArgs(format!("unknown border_shape {s:?}: rectangle, oval or circle"))))
+        .transpose()
 }
 
 #[cfg(test)]
