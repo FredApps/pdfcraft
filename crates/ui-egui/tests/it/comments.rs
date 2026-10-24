@@ -2938,7 +2938,7 @@ fn connected_lines_are_completed_from_the_context_menu() {
     // the drawing is on (the first page passes first and must not take the request).
     h.state_mut().set_option("quick", "polyline").unwrap();
     h.state_mut().set_option("zoom", "50").unwrap();
-    settle(&mut h);
+    crate::support::settle(&mut h);
     assert!(h.state().views[0].page_screen_rect(0).is_some(), "page 1 is on screen too");
     let at2 = |h: &Harness<'static, PdfCraftApp>, x: f32, y: f32| {
         let r = h.state().views[0].page_screen_rect(1).expect("page 2 on screen");
