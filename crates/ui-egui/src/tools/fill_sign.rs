@@ -263,7 +263,12 @@ fn new(page: usize, shape: Shape, contents: String, author: &str) -> Edit {
 /// where it would without one.
 pub fn typed(page: usize, at: [f64; 2], text: &str, size: f64, border: TextBorder, rotation: i64, author: &str) -> Edit {
     let width = valid_text_border(border.width).unwrap_or(0.0);
-    let [x0, y0, x1, y1] = crate::comments::text_box_rect(at, text, size, rotation);
+    // A circle goes around the text, so its box is no wider than the text needs.
+    let [x0, y0, x1, y1] = if width > 0.0 && border.shape == BorderShape::Circle {
+        crate::comments::snug_text_box_rect(at, text, size, rotation)
+    } else {
+        crate::comments::text_box_rect(at, text, size, rotation)
+    };
     let shape = Shape::Typewriter { rect: [x0 - width, y0 - width, x1 + width, y1 + width], font_size: size };
     let style = Style {
         width,
@@ -596,10 +601,21 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
                     BorderShape::Rectangle => {
                         ui.painter().rect_stroke(r.rect, 0.0, Stroke::new(w, color), egui::StrokeKind::Outside);
                     }
-                    // An oval or a circle around it, as it will be drawn (half the line outside).
+                    // A circle around the text typed so far, as `typed` will draw it: the box sized to
+                    // the text, the border around that.
+                    BorderShape::Circle => {
+                        let (bw, size) = (t.border.width, t.size);
+                        let longest = pdfcraft_engine::annot_text::text_width(t.text.trim(), size);
+                        let (tw, th) = (longest + 8.0 + 2.0 * bw, size * 1.2 + 6.0 + 2.0 * bw);
+                        let o = BorderShape::Circle.around([0.0, 0.0, tw, th], bw, Some([longest, size * 1.2]));
+                        let centre = pos + egui::vec2((tw / 2.0 - bw) as f32, (th / 2.0 - bw) as f32) * zoom;
+                        let radius = (o[2] - o[0]) as f32 / 2.0 * zoom - w / 2.0;
+                        ui.painter().add(egui::Shape::circle_stroke(centre, radius, Stroke::new(w, color)));
+                    }
+                    // An oval around it, as it will be drawn (half the line outside).
                     shape => {
                         let b = r.rect.expand(w);
-                        let o = shape.around([b.min.x, b.min.y, b.max.x, b.max.y].map(f64::from), f64::from(w));
+                        let o = shape.around([b.min.x, b.min.y, b.max.x, b.max.y].map(f64::from), f64::from(w), None);
                         let half = egui::vec2((o[2] - o[0]) as f32 / 2.0 - w / 2.0, (o[3] - o[1]) as f32 / 2.0 - w / 2.0);
                         ui.painter().add(egui::Shape::ellipse_stroke(r.rect.center(), half, Stroke::new(w, color)));
                     }

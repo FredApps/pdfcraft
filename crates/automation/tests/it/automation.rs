@@ -2047,6 +2047,10 @@ fn text_borders_take_an_oval_or_a_circle_through_the_tools() {
     let shapes: Vec<Value> = list(&mut a).iter().map(|c| c["border_shape"].clone()).collect();
     assert_eq!(shapes, [json!("circle"), json!("oval")]);
     let typed = list(&mut a)[0].clone();
+    // Snug around "12": the box no wider than the text needs, the circle as wide as that box.
+    let r: Vec<f64> = typed["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    let w = pdfcraft_engine::annot_text::text_width("12", 10.0) + 10.0;
+    assert!((r[2] - r[0] - w).abs() < 0.05 && (r[3] - r[1] - w).abs() < 0.05, "{r:?}");
     ok(&mut a, "comment_edit", json!({ "doc": doc, "page": typed["page"], "index": typed["index"], "border_shape": "oval" }));
     assert_eq!(list(&mut a)[0]["border_shape"], "oval");
     ok(&mut a, "comment_edit", json!({ "doc": doc, "page": typed["page"], "index": typed["index"], "border_shape": "rectangle" }));

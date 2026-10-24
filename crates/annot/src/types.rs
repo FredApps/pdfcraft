@@ -642,9 +642,12 @@ impl BorderShape {
     }
 
     /// The rectangle this shape, with a border `width` wide, takes around text box `tb`, centred on
-    /// it: an oval through the text box's corners (`√2` its size) or a circle through them, a point
-    /// clear of the border; the text box itself for a rectangle.
-    pub fn around(self, tb: [f64; 4], width: f64) -> [f64; 4] {
+    /// it: an oval through the text box's corners (`√2` its size), a point clear of the border; a
+    /// circle around the text's lines (`text`: the widest line's width and the lines' height, when
+    /// known), a point clear of the border and touching the text box's longer sides at least
+    /// (its corners, padding only, may lie outside), else through the box's corners; the text box
+    /// itself for a rectangle.
+    pub fn around(self, tb: [f64; 4], width: f64, text: Option<[f64; 2]>) -> [f64; 4] {
         let tb = normalize(tb);
         let (cx, cy, hx, hy) = ((tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0, (tb[2] - tb[0]) / 2.0, (tb[3] - tb[1]) / 2.0);
         let gap = width.max(0.0) + 1.0;
@@ -652,15 +655,19 @@ impl BorderShape {
             BorderShape::Rectangle => return tb,
             BorderShape::Oval => (hx * std::f64::consts::SQRT_2 + gap, hy * std::f64::consts::SQRT_2 + gap),
             BorderShape::Circle => {
-                let r = hx.hypot(hy) + gap;
+                let r = match text {
+                    Some([w, h]) => ((w / 2.0).hypot(h / 2.0) + gap).max(hx).max(hy),
+                    None => hx.hypot(hy) + gap,
+                };
                 (r, r)
             }
         };
         [cx - ax, cy - ay, cx + ax, cy + ay]
     }
 
-    /// The text box inside `outer` for this shape: the inverse of [`Self::around`]. A circle's
-    /// text box keeps the proportions of `was` (the one it had).
+    /// The text box inside `outer` for this shape when none is recorded: the inverse of
+    /// [`Self::around`] for an oval, a box through a circle's corners for a circle, keeping the
+    /// proportions of `was` (the one it had).
     fn inside(self, outer: [f64; 4], width: f64, was: [f64; 4]) -> [f64; 4] {
         let o = normalize(outer);
         let (cx, cy, hx, hy) = ((o[0] + o[2]) / 2.0, (o[1] + o[3]) / 2.0, (o[2] - o[0]) / 2.0, (o[3] - o[1]) / 2.0);

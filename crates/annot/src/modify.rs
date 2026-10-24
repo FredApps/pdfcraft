@@ -126,10 +126,13 @@ pub fn with_replies_and_popups(doc: &Document, list: &[Object], doomed: impl Int
 }
 
 /// Change a comment's text. Text boxes are redrawn to show it, and their rectangle follows the
-/// new text: the wrap width and top edge stay, the height fits the wrapped lines.
+/// new text: the wrap width and top edge stay, the height fits the wrapped lines. A circle snug
+/// around its text stays snug around the new text, centred where it was.
 pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, meta: &Meta) -> Result<(), AnnotError> {
     let (_, r) = annot_ref(doc, page, index)?;
-    let free_text = annot_dict(doc, r).name(b"Subtype") == Some(b"FreeText");
+    let d = annot_dict(doc, r);
+    let free_text = d.name(b"Subtype") == Some(b"FreeText");
+    let snug = free_text && is_snug(&d);
     doc.update_dict(r, |d| {
         d.set(b"Contents".to_vec(), PdfString::text(text));
         // The rich-text version follows the new plain text (text boxes), or would contradict it.
@@ -144,8 +147,16 @@ pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, m
         // The box grows and shrinks with the text instead of clipping it. A locked box keeps its
         // text editable (as in Acrobat), so the re-fit ignores the lock. New text is drawn even
         // where the standard fonts can't draw some of it (marked and reported, see
-        // `draw_appearance`).
-        match fitted_box(doc, r, text) {
+        // `draw_appearance`). A circle snug around its text stays snug around the new text; one
+        // made larger by hand keeps its size, only growing for more lines.
+        let fit = if snug {
+            snug_refit(doc, r)
+        } else {
+            let d = annot_dict(doc, r);
+            let circle = text_box_of(&d).filter(|_| BorderShape::of(&d) == BorderShape::Circle);
+            fitted_box(doc, r, text).map(|fit| circle.map_or(fit, |old| [fit[0], fit[1].min(old[1]), fit[2], fit[3]]))
+        };
+        match fit {
             Some(rect) => apply_text_box(doc, r, rect, meta, true)?,
             None => draw_appearance(doc, r)?,
         }
@@ -360,6 +371,16 @@ pub fn set_rect(doc: &mut Document, page: usize, index: usize, rect: [f64; 4], m
     let shape = if subtype == "FreeText" { BorderShape::of(&d) } else { BorderShape::Rectangle };
     let rect = match (shape, text_box_of(&d)) {
         (BorderShape::Rectangle, _) | (_, None) => rect,
+        // A circle's text box keeps its proportions and reaches the circle with its longer sides;
+        // the circle then goes around it again, never closer than its text allows.
+        (BorderShape::Circle, Some(was)) => {
+            let (o, w) = (normalize(rect), normalize(was));
+            let (cx, cy, r) = ((o[0] + o[2]) / 2.0, (o[1] + o[3]) / 2.0, (o[2] - o[0]).min(o[3] - o[1]) / 2.0);
+            let (wx, wy) = ((w[2] - w[0]) / 2.0, (w[3] - w[1]) / 2.0);
+            let k = r / wx.max(wy).max(1e-6);
+            let (ix, iy) = ((wx * k).max(0.5), (wy * k).max(0.5));
+            [cx - ix, cy - iy, cx + ix, cy + iy]
+        }
         (shape, Some(was)) => shape.inside(rect, border_width_of(&d), was),
     };
     apply_text_box(doc, r, rect, meta, false)
@@ -373,7 +394,7 @@ fn text_box_of(d: &Dict) -> Option<[f64; 4]> {
     if !d.contains(b"CL") && BorderShape::of(d) == BorderShape::Rectangle {
         return Some(rect);
     }
-    let rd = nums(b"RD").filter(|v| v.len() == 4 && v.iter().all(|x| x.is_finite() && *x >= 0.0))?;
+    let rd = appearance::inset(d)?;
     let tb = [rect[0] + rd[0], rect[1] + rd[1], rect[2] - rd[2], rect[3] - rd[3]];
     (tb[2] - tb[0] >= 1.0 && tb[3] - tb[1] >= 1.0).then_some(tb)
 }
@@ -382,20 +403,74 @@ fn text_box_of(d: &Dict) -> Option<[f64; 4]> {
 /// wide): `/Rect` around it, `/RD` and `/PCBorderShape`, or for a rectangle `/Rect` the text
 /// box itself again.
 fn shape_text_box(d: &mut Dict, tb: [f64; 4], shape: BorderShape, width: f64) {
-    let outer = shape.around(tb, width);
+    // A circle goes around the text as the box lays it out.
+    let text = (shape == BorderShape::Circle).then(|| text_extent(d, displayed_sides(d, tb).0 - 2.0 * (2.0 + width.max(0.0))));
+    let outer = shape.around(tb, width, text);
     d.set(b"Rect".to_vec(), num_array(&outer));
     if shape == BorderShape::Rectangle {
         d.remove(b"PCBorderShape");
         d.remove(b"RD");
     } else {
         d.set(b"PCBorderShape".to_vec(), Object::name(shape.name()));
+        // A circle touching the text box's sides would put them a rounding error outside it.
         let tb = normalize(tb);
-        d.set(b"RD".to_vec(), num_array(&[tb[0] - outer[0], tb[1] - outer[1], outer[2] - tb[2], outer[3] - tb[3]]));
+        let rd = [tb[0] - outer[0], tb[1] - outer[1], outer[2] - tb[2], outer[3] - tb[3]].map(|x| x.max(0.0));
+        d.set(b"RD".to_vec(), num_array(&rd));
     }
 }
 
+/// The width of the widest line and the height of the lines of FreeText `d`'s text, as its
+/// appearance lays the text out `wrap` wide.
+fn text_extent(d: &Dict, wrap: f64) -> [f64; 2] {
+    let text = d.get(b"Contents").and_then(|o| o.as_string()).map(PdfString::to_text).unwrap_or_default();
+    let (_, size) = appearance::parse_da(d);
+    let lines = appearance::wrap(&text, size, wrap.max(1.0));
+    let widest = lines.iter().map(|l| appearance::text_width(l, size)).fold(0.0, f64::max);
+    [widest, lines.len().max(1) as f64 * size * 1.2]
+}
+
+/// The width and height of FreeText `d`'s text box `tb` as displayed: swapped on a page turned by
+/// a quarter, where its text is laid out upright.
+fn displayed_sides(d: &Dict, tb: [f64; 4]) -> (f64, f64) {
+    let tb = normalize(tb);
+    let (w, h) = (tb[2] - tb[0], tb[3] - tb[1]);
+    if matches!(appearance::text_turn(d), 90 | 270) { (h, w) } else { (w, h) }
+}
+
+/// FreeText `d`'s text box `tb`, with a border `width` wide, made as large as its text wrapped
+/// `wrap` wide needs (its widest line and its lines, inside the padding a box sized to its text
+/// has) and centred where it was: a circle goes around this, not around a box wider than its text.
+fn snug_text_box(d: &Dict, tb: [f64; 4], width: f64, wrap: f64) -> [f64; 4] {
+    let tb = normalize(tb);
+    let pad = 2.0 + width.max(0.0);
+    let [w, h] = text_extent(d, wrap);
+    let (hx, hy) = (w / 2.0 + pad + 2.0, h / 2.0 + pad + 1.0);
+    let (hx, hy) = if matches!(appearance::text_turn(d), 90 | 270) { (hy, hx) } else { (hx, hy) };
+    let (cx, cy) = ((tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0);
+    [cx - hx, cy - hy, cx + hx, cy + hy]
+}
+
+/// Whether FreeText `d` is a circle whose text box is snug around its text ([`snug_text_box`]):
+/// it then follows its text as that changes, where one made larger by hand keeps its size.
+fn is_snug(d: &Dict) -> bool {
+    let Some(tb) = text_box_of(d).filter(|_| BorderShape::of(d) == BorderShape::Circle) else { return false };
+    let width = border_width_of(d);
+    let s = snug_text_box(d, tb, width, displayed_sides(d, tb).0 - 2.0 * (2.0 + width));
+    let tb = normalize(tb);
+    ((s[2] - s[0]) - (tb[2] - tb[0])).abs() < 0.5 && ((s[3] - s[1]) - (tb[3] - tb[1])).abs() < 0.5
+}
+
+/// The text box of a circle snug around its text for the text and size it has now: its lines up to
+/// 300 pt wide, centred where it was.
+fn snug_refit(doc: &Document, r: ObjRef) -> Option<[f64; 4]> {
+    let d = annot_dict(doc, r);
+    let width = border_width_of(&d);
+    Some(snug_text_box(&d, text_box_of(&d)?, width, 300.0 - 2.0 * (2.0 + width)))
+}
+
 /// Give a text box or typewriter text an oval, a circle or a rectangle for its border, and redraw
-/// it. Its text box keeps its place; the oval or circle goes around it.
+/// it. Its text box keeps its place; the oval or circle goes around it. For a circle the text box
+/// first shrinks to its text, its lines wrapped as they are.
 pub fn set_border_shape(doc: &mut Document, page: usize, index: usize, shape: BorderShape, meta: &Meta) -> Result<(), AnnotError> {
     let (_, r) = annot_ref(doc, page, index)?;
     unlocked(doc, r)?;
@@ -404,6 +479,13 @@ pub fn set_border_shape(doc: &mut Document, page: usize, index: usize, shape: Bo
         return Err(AnnotError::Invalid("only text boxes and typewriter text have a border shape".into()));
     }
     let tb = text_box_of(&d).ok_or_else(|| AnnotError::Invalid("the text box can't be read".into()))?;
+    let tb = match shape {
+        BorderShape::Circle => {
+            let width = border_width_of(&d);
+            snug_text_box(&d, tb, width, displayed_sides(&d, tb).0 - 2.0 * (2.0 + width))
+        }
+        _ => tb,
+    };
     refuse_foreign_text(doc, &d)?;
     let before = d;
     doc.update_dict(r, |d| {
@@ -681,6 +763,7 @@ pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, m
         return Err(AnnotError::Invalid("font size must be 1\u{2013}400 pt".into()));
     }
     refuse_foreign_text(doc, &d)?;
+    let snug = is_snug(&d);
     let before = d;
     doc.update_dict(r, |d| {
         let (col, _) = appearance::parse_da(d);
@@ -689,8 +772,10 @@ pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, m
         touch(d, meta);
     })?;
     let text = text_value(doc, &annot_dict(doc, r), b"Contents").unwrap_or_default();
-    let result = match fitted_box(doc, r, &text) {
-        Some(fit) => {
+    let result = match (snug, if snug { snug_refit(doc, r) } else { fitted_box(doc, r, &text) }) {
+        // A circle snug around its text stays snug around it at the new size.
+        (true, Some(fit)) => apply_text_box(doc, r, fit, meta, false),
+        (false, Some(fit)) => {
             let cur = annot_dict(doc, r);
             // Keep the top and sides; only the bottom edge moves, and only downwards.
             match text_box_of(&cur) {
@@ -698,7 +783,7 @@ pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, m
                 _ => apply_text_box(doc, r, fit, meta, false),
             }
         }
-        None => redraw_or_restore(doc, r, before.clone()),
+        (_, None) => redraw_or_restore(doc, r, before.clone()),
     };
     if result.is_err() {
         doc.set(r, Object::Dict(before));

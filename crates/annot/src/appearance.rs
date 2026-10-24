@@ -326,8 +326,16 @@ fn stamp_turn(d: &Dict) -> i64 {
 
 /// The page `/Rotate` a text box's or Fill & Sign text's lines are turned back by
 /// (`/PCTextRotate`, written when it is added to a turned page).
-fn text_turn(d: &Dict) -> i64 {
+pub(crate) fn text_turn(d: &Dict) -> i64 {
     d.get(b"PCTextRotate").and_then(Object::as_int).unwrap_or(0).rem_euclid(360) / 90 * 90
+}
+
+/// A FreeText's `/RD`: how far its text box lies inside `/Rect` from the left, bottom, right and
+/// top. A distance a hair below 0 (rounding) reads as 0; `None` when one is negative or they can't
+/// be read.
+pub(crate) fn inset(d: &Dict) -> Option<[f64; 4]> {
+    let rd: [f64; 4] = nums(d, b"RD")?.try_into().ok()?;
+    rd.iter().all(|x| x.is_finite() && *x > -0.001).then(|| rd.map(|x| x.max(0.0)))
 }
 
 /// The first text [`build`] would draw in the standard fonts (Helvetica, WinAnsiEncoding) that
@@ -977,7 +985,7 @@ fn draw_free_text(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawin
     let shape = crate::BorderShape::of(d);
     if shape != crate::BorderShape::Rectangle {
         // Laid out as displayed: a quarter turn swaps the sides' differences.
-        rect = match nums(d, b"RD").filter(|r| r.len() == 4 && r.iter().all(|x| x.is_finite() && *x >= 0.0)) {
+        rect = match inset(d) {
             Some(rd) => {
                 let (dx, dy) = if matches!(turn, 90 | 270) { (rd[1], rd[0]) } else { (rd[0], rd[1]) };
                 [full[0] + dx, full[1] + dy, full[2] - dx, full[3] - dy]

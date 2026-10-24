@@ -402,6 +402,11 @@ fn typed_text_takes_an_oval_or_a_circle_from_the_toolbar() {
     assert_eq!(props(&h).border_shape, Some(BorderShape::Circle), "new text gets the circle");
     let r = h.state().session.get(h.state().views[0].id).unwrap().info.annotations.iter().find(|a| a.index == index).unwrap().rect;
     assert!(((r[2] - r[0]) - (r[3] - r[1])).abs() < 0.01, "a circle's square box: {r:?}");
+    // Snug around "12" at 10 pt: its box no wider than the text needs (not the 40 pt a box to type
+    // into keeps), so the circle is as wide as that box, where it was 50 pt around the wider one.
+    let w = pdfcraft_engine::annot_text::text_width("12", 10.0) + 10.0;
+    let across = f64::from(r[2] - r[0]);
+    assert!((across - w.max(20.0)).abs() < 0.01, "the circle is {across} pt across, not {w}: {r:?}");
     // Selected, an oval from the toolbar: one undo step.
     h.state_mut().views[0].comments.selected = Some((page, index));
     h.run_steps(3);
