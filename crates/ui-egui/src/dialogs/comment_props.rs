@@ -121,6 +121,8 @@ impl PdfCraftApp {
             style.fill = p.fill;
         }
         self.comment_prefs.set_style(tool, style);
+        // A text box's or callout's own border colour (cleared for tools that have none).
+        self.comment_prefs.set_border_color(tool, p.border_color);
         // Keep invisible defaults out of tools where a zero stroke would make them disappear.
         self.comment_prefs.set_opacity(tool, p.opacity);
         if let Some(w) = p.width {
