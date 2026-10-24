@@ -449,22 +449,6 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                                     })
                                     .then_some((page, annotation))
                             };
-                        // The controls show the selected text's own size and border, which Comment
-                        // Properties may have changed since: unless one is being dragged or typed
-                        // into. What they show is also what new text gets.
-                        let busy = ui.ctx().dragged_id().is_some() || ui.ctx().memory(|m| m.focused().is_some());
-                        if !busy
-                            && let Some((page, annotation)) = selected_text(app)
-                            && let Some(p) = app.active_ids().and_then(|(_, id)| app.session.get(id)).and_then(|d| d.comment_props(page, annotation))
-                        {
-                            if let Some(size) = p.font_size.and_then(crate::fill_sign::valid_text_size) {
-                                app.fill_text_size = size;
-                            }
-                            if let Some(width) = p.width.and_then(crate::fill_sign::valid_text_border) {
-                                app.fill_text_border = width;
-                            }
-                            app.fill_text_border_color = p.border_color;
-                        }
                         ui.label(tl!("Font size:"));
                         let size = ui.add(
                             egui::DragValue::new(&mut app.fill_text_size)
@@ -480,39 +464,57 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         {
                             app.apply_edit(Edit::FontSizeAnnotation { page, index: annotation, size: app.fill_text_size });
                         }
+                        // The selected text's own border (Comment Properties may have changed it
+                        // since): the controls below show it and change only it. Without one they
+                        // set what new text gets until PdfCraft quits; Make Current Properties
+                        // Default on typed text keeps it.
+                        let selected = selected_text(app).and_then(|(page, annotation)| {
+                            let p = app.active_ids().and_then(|(_, id)| app.session.get(id))?.comment_props(page, annotation)?;
+                            Some((page, annotation, crate::fill_sign::TextBorder { width: p.width.unwrap_or(0.0), color: p.border_color }))
+                        });
+                        let was = selected.map_or(
+                            crate::fill_sign::TextBorder { width: app.fill_text_border, color: app.fill_text_border_color },
+                            |(_, _, own)| own,
+                        );
+                        let mut border = was;
                         // A border around the text, in its colour; the text keeps its place.
                         let border_label = |w: f64| if w > 0.0 { format!("{w} pt") } else { tl!("None").to_string() };
                         let label = ui.label(tl!("Border:"));
-                        let before = app.fill_text_border;
                         egui::ComboBox::from_id_salt("fill-text-border")
-                            .selected_text(border_label(before))
+                            .selected_text(border_label(was.width))
                             .width(72.0)
                             .show_ui(ui, |ui| {
                                 for w in crate::fill_sign::TEXT_BORDERS {
-                                    ui.selectable_value(&mut app.fill_text_border, w, border_label(w));
+                                    ui.selectable_value(&mut border.width, w, border_label(w));
                                 }
                             })
                             .response
                             .labelled_by(label.id);
-                        if app.fill_text_border != before
-                            && let Some((page, annotation)) = selected_text(app)
-                        {
-                            app.apply_edit(Edit::StyleAnnotation {
-                                page,
-                                index: annotation,
-                                color: None,
-                                opacity: None,
-                                width: Some(app.fill_text_border),
-                                endings: None,
-                            });
-                        }
                         // The border's own colour (the text's unless picked).
-                        if app.fill_text_border > 0.0
-                            && let Some(color) = comments::border_colour_button(ui, app.fill_text_border_color, [0.0; 3])
+                        if was.width > 0.0
+                            && let Some(color) = comments::border_colour_button(ui, was.color, [0.0; 3])
                         {
-                            app.fill_text_border_color = color;
-                            if let Some((page, annotation)) = selected_text(app) {
-                                app.apply_edit(Edit::BorderColorAnnotation { page, index: annotation, color });
+                            border.color = color;
+                        }
+                        match selected {
+                            Some((page, index, _)) => {
+                                if border.width != was.width {
+                                    app.apply_edit(Edit::StyleAnnotation {
+                                        page,
+                                        index,
+                                        color: None,
+                                        opacity: None,
+                                        width: Some(border.width),
+                                        endings: None,
+                                    });
+                                }
+                                if border.color != was.color {
+                                    app.apply_edit(Edit::BorderColorAnnotation { page, index, color: border.color });
+                                }
+                            }
+                            None => {
+                                app.fill_text_border = border.width;
+                                app.fill_text_border_color = border.color;
                             }
                         }
                     }

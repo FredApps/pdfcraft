@@ -102,8 +102,8 @@ impl PdfCraftApp {
             "ui_scale": self.ui_scale,
             "flatten_fill_sign": self.flatten_fill_sign_on_save,
             "fill_text_size": self.fill_text_size,
-            "fill_text_border": self.fill_text_border,
-            "fill_text_border_color": self.fill_text_border_color,
+            "fill_text_border": self.fill_text_default.width,
+            "fill_text_border_color": self.fill_text_default.color,
             "date_format": self.session.date_format(),
             // Null follows the interface language.
             "date_language": self.session.date_language(),
@@ -265,18 +265,21 @@ impl PdfCraftApp {
             self.fill_text_size = size;
         }
         if let Some(width) = v["fill_text_border"].as_f64().and_then(fill_sign::valid_text_border) {
-            self.fill_text_border = width;
+            self.fill_text_default.width = width;
         }
         // `null` is a saved "the text's colour"; a missing or malformed one keeps the setting.
         match v.get("fill_text_border_color") {
-            Some(serde_json::Value::Null) => self.fill_text_border_color = None,
+            Some(serde_json::Value::Null) => self.fill_text_default.color = None,
             Some(c) => {
                 if let Some(c) = rgb_triple(c) {
-                    self.fill_text_border_color = Some(c.map(|x| x.clamp(0.0, 1.0)));
+                    self.fill_text_default.color = Some(c.map(|x| x.clamp(0.0, 1.0)));
                 }
             }
             None => {}
         }
+        // Fill & Sign text starts from the saved border.
+        self.fill_text_border = self.fill_text_default.width;
+        self.fill_text_border_color = self.fill_text_default.color;
         if let Some(prefs) = RedactPrefs::from_json(&v["redact_prefs"]) {
             self.redact_prefs = prefs.clone();
             self.redact_defaults = prefs;

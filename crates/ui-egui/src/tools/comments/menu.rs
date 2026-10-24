@@ -98,7 +98,7 @@ pub(crate) fn context_menu(
                 action = Some(CanvasAction::Properties(page, index));
                 ui.close();
             }
-            if ui.add_enabled(tool_for(a).is_some(), egui::Button::new(tl!("Make Current Properties Default"))).clicked() {
+            if ui.add_enabled(defaultable(a), egui::Button::new(tl!("Make Current Properties Default"))).clicked() {
                 view.comments.default_request = Some((page, index));
                 ui.close();
             }

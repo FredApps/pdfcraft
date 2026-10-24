@@ -99,6 +99,19 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
         let Some(a) = doc.info.annotations.iter().find(|a| a.page == page && a.index == index && !a.is_reply()) else { return };
+        // Typed text has no comment tool: Fill & Sign gives new text its size and border, kept
+        // across launches.
+        if crate::comments::typed_text(a) {
+            let kind = crate::i18n::in_sentence(tl!(crate::comments_panel::kind_label(a))).to_string();
+            if let Some(size) = p.font_size.and_then(crate::fill_sign::valid_text_size) {
+                self.fill_text_size = size;
+            }
+            let width = p.width.and_then(crate::fill_sign::valid_text_border).unwrap_or(0.0);
+            self.fill_text_default = crate::fill_sign::TextBorder { width, color: p.border_color };
+            (self.fill_text_border, self.fill_text_border_color) = (width, p.border_color);
+            self.notify_fmt("New {tool} comments will look like this one", &[("tool", &kind)]);
+            return;
+        }
         let Some(tool) = crate::comments::tool_for_default(a, p.endings.as_deref()) else { return };
         let mut style = self.comment_prefs.style(tool);
         if let Some(c) = p.color {
@@ -179,11 +192,10 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
                 .collect()
         })
         .unwrap_or_default();
-    let default_tool = app.comment_props.as_ref().and_then(|d| {
-        let (_, id) = app.active_ids()?;
-        let doc = app.session.get(id)?;
-        let a = doc.info.annotations.iter().find(|a| a.page == d.page && a.index == d.index && !a.is_reply())?;
-        crate::comments::tool_for_default(a, d.edited.endings.as_deref())
+    let has_default = app.comment_props.as_ref().is_some_and(|d| {
+        let doc = app.active_ids().and_then(|(_, id)| app.session.get(id));
+        doc.and_then(|doc| doc.info.annotations.iter().find(|a| a.page == d.page && a.index == d.index && !a.is_reply()))
+            .is_some_and(|a| crate::comments::tool_for_default(a, d.edited.endings.as_deref()).is_some() || crate::comments::typed_text(a))
     });
     let Some(d) = app.comment_props.as_mut() else { return (false, true) };
     let kind = tl!(crate::comments_panel::subtype_label(&d.edited.subtype)).to_string();
@@ -302,8 +314,9 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
     ui.horizontal(|ui| {
         ui.add(widgets::checkbox(&mut d.edited.locked, tl!("Locked")));
         ui.add_space(16.0);
-        // Acrobat's box beside Locked. Only a comment whose look can change, made by a tool.
-        let defaultable = d.edited.restylable && default_tool.is_some();
+        // Acrobat's box beside Locked. Only a comment whose look can change, made by a tool (or
+        // typed text, for Fill & Sign).
+        let defaultable = d.edited.restylable && has_default;
         ui.add_enabled(defaultable, widgets::checkbox(&mut d.make_default, tl!("Make Properties Default")));
     });
     let (mut apply, mut cancel) = (false, false);

@@ -283,10 +283,10 @@ fn the_type_box_text_matches_the_page_zoom_in_a_turned_view() {
 }
 
 /// With a placed text selected, the toolbar shows its own border, also after Comment Properties
-/// changed it; the Border colour button gives that border its own colour ("Same as text" takes
-/// it back), and new text gets what the toolbar shows.
+/// changed it, and changes only that text: the Border colour button gives its border its own
+/// colour ("Same as text" takes it back), and new text keeps the toolbar's own border.
 #[test]
-fn the_toolbar_follows_the_selected_texts_border_and_colours_it() {
+fn the_toolbar_shows_and_changes_the_selected_texts_border() {
     let mut h = harness();
     h.state_mut().execute("sign.fill.text");
     click(&mut h, 50.0, 250.0);
@@ -300,12 +300,15 @@ fn the_toolbar_follows_the_selected_texts_border_and_colours_it() {
         (a.page, a.index)
     };
     let props = |h: &Harness<'static, PdfCraftApp>| h.state().session.get(h.state().views[0].id).unwrap().comment_props(page, index).unwrap();
+    let shows = |h: &Harness<'static, PdfCraftApp>, value: &str| {
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).any(|n| n.value().as_deref() == Some(value))
+    };
     h.state_mut().views[0].comments.selected = Some((page, index));
     // As Comment Properties ▸ Thickness does.
     h.state_mut().apply_edit(pdfcraft_engine::Edit::StyleAnnotation { page, index, color: None, opacity: None, width: Some(2.0), endings: None });
     h.run_steps(3);
-    assert_eq!(h.state().fill_text_border, 2.0, "the toolbar follows the selected text");
-    assert!(h.query_all_by_role(egui::accesskit::Role::ComboBox).any(|n| n.value().as_deref() == Some("2 pt")));
+    assert!(shows(&h, "2 pt"), "the toolbar shows the selected text's border");
+    assert_eq!(h.state().fill_text_border, 0.0, "new text keeps none");
 
     h.get_by_label("Border colour").click();
     h.run_steps(2);
@@ -313,20 +316,16 @@ fn the_toolbar_follows_the_selected_texts_border_and_colours_it() {
     h.run_steps(4);
     let red = Some([0.89, 0.13, 0.13]);
     assert_eq!(props(&h).border_color, red, "the selected text's border is red");
-    assert_eq!(h.state().fill_text_border_color, red, "and new text's will be");
+    assert_eq!(h.state().fill_text_border_color, None, "new text's border keeps the text's colour");
     h.get_by_label("Border colour").click();
     h.run_steps(2);
     h.get_by_label("Same as text").click();
     h.run_steps(4);
     assert_eq!(props(&h).border_color, None);
-
-    h.state_mut().fill_text_border_color = red;
-    let settings = h.state().persist();
-    let mut restored = PdfCraftApp::new();
-    restored.restore(&settings);
-    assert_eq!(restored.fill_text_border_color, red);
-    restored.restore(r#"{"fill_text_border_color":null}"#);
-    assert_eq!(restored.fill_text_border_color, None, "null is the text's colour");
+    // Nothing selected, the toolbar shows new text's border again.
+    h.state_mut().views[0].comments.selected = None;
+    h.run_steps(2);
+    assert!(shows(&h, "None"));
 }
 
 /// The Border control puts a frame around new Fill & Sign text, and around the text that is
@@ -371,17 +370,63 @@ fn fill_text_border_frames_new_and_selected_text() {
     h.run_steps(2);
     h.get_by_label("2 pt").click();
     h.run_steps(4);
-    assert_eq!(h.state().fill_text_border, 2.0);
+    assert_eq!(h.state().fill_text_border, 1.5, "new text keeps its own");
     let (_, _, now) = texts(&h)[0];
     assert!((width(now) - width(plain) - 4.0).abs() < 0.01, "2 pt on each side: {plain:?} {now:?}");
     assert!((plain[0] - now[0] - 2.0).abs() < 0.01 && (now[3] - plain[3] - 2.0).abs() < 0.01, "grown outwards, the text in place: {plain:?} {now:?}");
 
+    // The toolbar's border lasts until PdfCraft quits; a saved default is read back.
     let settings = h.state().persist();
     let mut restored = PdfCraftApp::new();
     restored.restore(&settings);
+    assert_eq!(restored.fill_text_border, 0.0);
+    restored.restore(r#"{"fill_text_border":2}"#);
     assert_eq!(restored.fill_text_border, 2.0);
     restored.restore(r#"{"fill_text_border":100}"#);
     assert_eq!(restored.fill_text_border, 2.0, "invalid settings do not change the border");
+}
+
+/// Make Properties Default on typed text sets what Fill & Sign gives new text, its size and
+/// border, and keeps it across launches.
+#[test]
+fn typed_text_made_default_is_what_new_text_gets() {
+    use pdfcraft_engine::Edit;
+    let mut h = harness();
+    h.state_mut().execute("sign.fill.text");
+    let type_at = |h: &mut Harness<'static, PdfCraftApp>, y: f32, text: &str| {
+        click(h, 50.0, y);
+        h.event(egui::Event::Text(text.into()));
+        h.run_steps(1);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        let s = h.state();
+        let a = s.session.get(s.views[0].id).unwrap().info.annotations.iter().find(|a| a.contents.as_deref() == Some(text)).cloned().unwrap();
+        (a.page, a.index)
+    };
+    let (page, index) = type_at(&mut h, 150.0, "Model");
+    let red = Some([0.89, 0.13, 0.13]);
+    for edit in [
+        Edit::StyleAnnotation { page, index, color: None, opacity: None, width: Some(1.5), endings: None },
+        Edit::BorderColorAnnotation { page, index, color: red },
+        Edit::FontSizeAnnotation { page, index, size: 14.0 },
+    ] {
+        assert!(h.state_mut().apply_edit(edit));
+    }
+    h.state_mut().open_comment_props(page, index);
+    h.run_steps(2);
+    h.get_by_label("Make Properties Default").click();
+    h.run_steps(1);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!((s.fill_text_size, s.fill_text_border, s.fill_text_border_color), (14.0, 1.5, red));
+    let mut restored = PdfCraftApp::new();
+    restored.restore(&h.state().persist());
+    assert_eq!((restored.fill_text_size, restored.fill_text_border, restored.fill_text_border_color), (14.0, 1.5, red), "kept across launches");
+    h.state_mut().views[0].comments.selected = None;
+    let (page, index) = type_at(&mut h, 350.0, "Next");
+    let p = h.state().session.get(h.state().views[0].id).unwrap().comment_props(page, index).unwrap();
+    assert_eq!((p.font_size, p.width, p.border_color), (Some(14.0), Some(1.5), red));
 }
 
 #[test]

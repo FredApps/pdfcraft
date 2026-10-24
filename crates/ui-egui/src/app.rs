@@ -75,6 +75,7 @@ impl PdfCraftApp {
             fill_text_size: fill_sign::TEXT_SIZE,
             fill_text_border: 0.0,
             fill_text_border_color: None,
+            fill_text_default: fill_sign::TextBorder::NONE,
             dialog: None,
             updates: updates::Updates::default(),
             printer_source: None,

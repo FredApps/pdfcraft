@@ -379,6 +379,17 @@ fn arrow_ending(ending: LineEnding) -> bool {
     matches!(ending, LineEnding::OpenArrow | LineEnding::ClosedArrow | LineEnding::ROpenArrow | LineEnding::RClosedArrow)
 }
 
+/// Typed text (Fill & Sign's, or a typewriter's): no comment tool makes it, so Make Current
+/// Properties Default sets what Fill & Sign gives new text.
+pub(crate) fn typed_text(a: &Annotation) -> bool {
+    a.subtype == "FreeText" && a.intent.as_deref() == Some("FreeTextTypeWriter")
+}
+
+/// Whether Make Current Properties Default has defaults to set from `a`.
+pub(crate) fn defaultable(a: &Annotation) -> bool {
+    tool_for(a).is_some() || typed_text(a)
+}
+
 /// The tool that makes comments like `a` (for Make Current Properties Default).
 pub fn tool_for(a: &Annotation) -> Option<CommentTool> {
     Some(match (a.subtype.as_str(), a.intent.as_deref()) {
