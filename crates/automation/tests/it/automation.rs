@@ -2057,6 +2057,7 @@ fn text_borders_take_an_oval_or_a_circle_through_the_tools() {
     assert!(list(&mut a)[0].get("border_shape").is_none(), "a rectangle is not reported");
     for (tool, args) in [
         ("fill_sign_add", json!({ "doc": doc, "page": 1, "type": "check", "at": [60, 60], "border_shape": "oval" })),
+        ("fill_sign_add", json!({ "doc": doc, "page": 1, "type": "text", "text": "7", "at": [60, 60], "border_shape": "circle" })),
         ("comment_add", json!({ "doc": doc, "page": 1, "type": "rectangle", "rect": [80, 10, 120, 40], "border_shape": "oval" })),
         ("comment_edit", json!({ "doc": doc, "page": typed["page"], "index": typed["index"], "border_shape": "star" })),
     ] {

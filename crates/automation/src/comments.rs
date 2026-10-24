@@ -540,6 +540,10 @@ impl Automation {
         if border_shape.is_some() && !matches!(kind, "text" | "date") {
             return Err(ToolError::InvalidArgs("border_shape is only for type text or date".into()));
         }
+        // Without a border an oval or a circle would grow the box around nothing drawn.
+        if border_shape.is_some_and(|s| s != BorderShape::Rectangle) && border <= 0.0 {
+            return Err(ToolError::InvalidArgs("border_shape needs a border".into()));
+        }
         if let Some(path) = a.opt_str("path")? {
             if !matches!(kind, "signature" | "initials") || a.opt_str("text")?.is_some() {
                 return Err(ToolError::InvalidArgs("path is only for an image signature or initials; pass either path or text".into()));

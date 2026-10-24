@@ -1274,7 +1274,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "font_size": { "type": "number", "minimum": 4, "maximum": 300, "description": "For type text or date (default 10 pt)." },
                 "border": { "type": "number", "minimum": 0, "maximum": 12, "description": "For type text or date: a border around it in points, in the text's colour (default 0, none)." },
                 "border_color": { "type": "string", "description": "With border: its own colour, #RRGGBB or a colour name." },
-                "border_shape": { "type": "string", "enum": ["rectangle", "oval", "circle"], "description": "For type text or date: the border's shape (default rectangle); an oval or a circle goes around the text." },
+                "border_shape": { "type": "string", "enum": ["rectangle", "oval", "circle"], "description": "With border, for type text or date: the border's shape (default rectangle); an oval or a circle goes around the text." },
                 "path": { "type": "string", "description": "PNG or JPEG for signature/initials; pass either path or text." },
                 "scan": { "type": "boolean", "description": "With path: scan a photo of a signature on paper (default false)." },
                 "sensitivity": { "type": "integer", "minimum": 0, "maximum": 100, "description": "With scan: how faint ink may be, 0–100 (default 50)." },
