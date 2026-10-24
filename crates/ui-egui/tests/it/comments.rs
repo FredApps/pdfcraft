@@ -2760,6 +2760,46 @@ fn dragging_any_selected_comment_moves_the_whole_selection() {
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Move comments"));
 }
 
+/// Copied comments on the pointer take the click whatever tool is on: with Fill & Sign's Text
+/// tool or a stamp tool still on, the click places the bundle and opens no text box or stamp.
+#[test]
+fn copied_comments_take_the_click_from_the_tool_that_is_on() {
+    use pdfcraft_ui_egui::fill_sign::FillTool;
+    let mut h = harness(|_| {});
+    let id = h.state().views[0].id;
+    let shape = pdfcraft_engine::Shape::Rectangle { rect: [20.0, 20.0, 60.0, 60.0] };
+    let style = pdfcraft_engine::Style::default_for(&shape);
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+        page: 0,
+        shape,
+        style,
+        contents: String::new(),
+        author: "Tester".into(),
+    })));
+    h.run_steps(2);
+    h.state_mut().views[0].comments.select_only((0, 0));
+    assert!(h.state_mut().execute("comment.copy"));
+    let count = |h: &Harness<'static, PdfCraftApp>| h.state().session.get(id).unwrap().info.annotations.len();
+    for (tool, at) in [(QuickTool::Fill(FillTool::Text), (150.0, 100.0)), (QuickTool::Stamp(pdfcraft_engine::StampKind::Approved), (200.0, 160.0))] {
+        h.state_mut().quick_tool = tool;
+        h.run_steps(2);
+        let before = count(&h);
+        assert!(h.state_mut().execute("comment.paste"));
+        click_pt(&mut h, at);
+        assert_eq!(count(&h), before + 1, "{tool:?}: the copy, and nothing else");
+        assert!(h.state().views[0].fill_text.is_none(), "{tool:?}: no text box opens");
+        assert!(h.state().views[0].comments.gesture.is_none());
+        let placed = h.state().session.get(id).unwrap().info.annotations.iter().max_by_key(|a| a.index).map(|a| a.rect).expect("placed");
+        assert!(((placed[0] + placed[2]) / 2.0 - at.0).abs() < 1.0, "{tool:?}: centred on the click: {placed:?}");
+        assert_eq!(h.state().quick_tool, tool, "the tool stays on for the next click");
+    }
+    // Afterwards the tool takes its clicks again.
+    h.state_mut().quick_tool = QuickTool::Fill(FillTool::Text);
+    h.run_steps(2);
+    click_pt(&mut h, (100.0, 200.0));
+    assert!(h.state().views[0].fill_text.is_some(), "Fill & Sign's Text tool opens its box again");
+}
+
 /// Copied comments paste into another document on its current page, each with its replies, as
 /// new comments (a second paste gives a second set); the copies are selected afterwards.
 #[test]
