@@ -132,7 +132,7 @@ impl PdfCraftApp {
         let keys = self.views.get(i).map(|v| v.comments.selection()).unwrap_or_default();
         let mut edits: Vec<Edit> = keys
             .into_iter()
-            .filter(|(p, ix)| doc.info.annotations.iter().any(|a| a.page == *p && a.index == *ix && a.in_reply_to.is_none() && only(a)))
+            .filter(|(p, ix)| doc.info.annotations.iter().any(|a| a.page == *p && a.index == *ix && !a.is_reply() && only(a)))
             .filter(|(p, ix)| doc.comment_props(*p, *ix).is_some_and(|c| c.restylable && !c.locked))
             .map(|(page, index)| Edit::StyleAnnotation { page, index, color: Some(color), opacity: None, width: None, endings: None })
             .collect();

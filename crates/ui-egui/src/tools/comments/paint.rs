@@ -134,7 +134,7 @@ fn paint_gesture(painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView) {
     // The bundle of copied comments, hanging on the pointer over this page: its box, and each
     // comment's outline in its colour, so the drop can be aimed to the line.
     if let Some(Gesture::Place { bounds, count, outlines, .. }) = &view.comments.gesture
-        && let Some(p) = painter.ctx().input(|i| i.pointer.hover_pos())
+        && let Some(p) = cx.ptr.pos
         && cx.xf.rect.contains(p)
     {
         let [x, y] = cx.to_user(p);

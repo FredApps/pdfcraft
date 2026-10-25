@@ -75,7 +75,7 @@ fn select_after_edit(view: &mut crate::DocView, edit: Edit, info: &pdfcraft_rend
             let mut new: Vec<(usize, usize)> = info
                 .annotations
                 .iter()
-                .filter(|x| x.page == page && x.in_reply_to.is_none() && !before.contains(&x.name))
+                .filter(|x| x.page == page && !x.is_reply() && !before.contains(&x.name))
                 .map(|x| (page, x.index))
                 .collect();
             view.comments.clear_selection();
