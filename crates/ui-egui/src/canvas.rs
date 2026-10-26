@@ -2018,7 +2018,6 @@ fn draw_pages(
         }
     }
     let origin = resp_rect.min - vec2(0.0, y_shift);
-    out.row_on_screen = shown_row(view, env.rects).iter().filter_map(|&i| env.rects.get(i)).map(|r| r.translate(origin.to_vec2())).reduce(Rect::union);
     let visible = viewport.translate(resp_rect.min.to_vec2());
     view.screen_rects.clear();
     view.screen_xforms.clear();
@@ -2138,6 +2137,8 @@ fn draw_pages(
     if view.continuous {
         view.current = current;
     }
+    // The row as it is now: in continuous view the current page may have changed above.
+    out.row_on_screen = shown_row(view, env.rects).iter().filter_map(|&i| env.rects.get(i)).map(|r| r.translate(origin.to_vec2())).reduce(Rect::union);
     resp.context_menu(|ui| {
         // Preparing a form: the selected field's menu.
         if preparing && let Some((name, wi)) = view.prepare.selected.clone() {
