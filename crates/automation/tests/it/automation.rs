@@ -8816,8 +8816,8 @@ fn text_box_and_callout_fill_and_border_through_tools() {
 }
 
 /// Three paragraphs: Alpha (two rows), Bravo (one row) and Charlie (two rows), at the leading
-/// of #2516. A third Alpha row brings its last baseline within 2.5 × size of Bravo's, so the next
-/// read groups the two as one paragraph.
+/// of #2516. Alpha's last baseline is 35.6 pt above Bravo's; moving Alpha down 21.2 pt leaves
+/// 14.4 pt, Alpha's own leading, so the next read groups the two as one paragraph.
 fn three_paragraph_pdf() -> Vec<u8> {
     use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
     use std::sync::Arc;
@@ -8866,6 +8866,10 @@ fn an_emptied_paragraph_does_not_pass_its_number_to_an_overlapping_neighbour() {
 /// #2516: a paragraph number names the paragraph `text_paragraphs` listed. When an edit regroups
 /// the page so that paragraph no longer exists on its own, the next edit by that number is
 /// refused. It used to rewrite whichever paragraph had taken the number, and that text was gone.
+///
+/// Moving Alpha down (no text change) is the regrouping edit: #2517 wraps a rewrite that adds or
+/// keeps rows in a marked region precisely so it can't be mistaken for a neighbour by geometry
+/// alone, so a text rewrite can no longer manufacture this scenario; a pure move still can.
 #[test]
 fn text_edit_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
     let dir = workdir("text-edit-stale-number");
@@ -8877,12 +8881,9 @@ fn text_edit_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
     assert!(listed["paragraphs"][1]["text"].as_str().unwrap().starts_with("Bravo"));
 
     // Listing again here would renumber the page, so the first edit's result says what moved.
-    let first = ok(
-        &mut a,
-        "text_edit",
-        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
-    );
-    assert_eq!(first["stale_paragraphs"], json!([1, 2]), "the third row regroups Alpha with Bravo: {first}");
+    // Moving Alpha down by 21.2 pt brings its last row within 14.4 pt of Bravo, its own leading.
+    let first = ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"dy":-21.2}));
+    assert_eq!(first["stale_paragraphs"], json!([1, 2]), "moving Alpha down regroups it with Bravo: {first}");
 
     // Paragraph 2 of the earlier listing was Bravo, which is now part of Alpha's paragraph.
     let stale = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
@@ -8897,13 +8898,14 @@ fn text_edit_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
     assert!(relisted["paragraphs"][1]["text"].as_str().unwrap().starts_with("Charlie"));
     ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":2,"text":"Charlie paragraph, edited."}));
     let text = page_text(&mut a, doc).join(" ");
-    assert!(text.contains("Charlie paragraph, edited.") && text.contains("Alpha paragraph, a third row."), "{text}");
+    assert!(text.contains("Charlie paragraph, edited.") && text.contains("Alpha paragraph, second row."), "{text}");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// An edit that merges its paragraph into a neighbour leaves no paragraph of its own to follow:
 /// the merged one holds the edited text too, but rewriting it by the edited paragraph's number
-/// would drop the neighbour's text (#2516).
+/// would drop the neighbour's text (#2516). Moving Alpha down (see the previous test) is the
+/// regrouping edit, since a text rewrite is marked precisely so it cannot merge this way (#2517).
 #[test]
 fn text_edit_does_not_follow_a_paragraph_into_the_one_it_merged_with() {
     let dir = workdir("text-edit-merged-number");
@@ -8911,11 +8913,7 @@ fn text_edit_does_not_follow_a_paragraph_into_the_one_it_merged_with() {
     let mut a = auto(&dir);
     let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
     ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
-    let first = ok(
-        &mut a,
-        "text_edit",
-        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
-    );
+    let first = ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"dy":-21.2}));
     assert!(first.get("paragraph").is_none(), "the result must not present the merged paragraph as the edited one: {first}");
 
     // Paragraph 1 was Alpha. Alpha now shares a paragraph with Bravo, so the number is refused.
@@ -8929,6 +8927,8 @@ fn text_edit_does_not_follow_a_paragraph_into_the_one_it_merged_with() {
 
 /// The editor background preview takes the same paragraph number as `text_edit`, so it hides the
 /// paragraph the number named in the listing and refuses a number an edit made stale (#2516).
+/// Moving Alpha down (see the two tests above) is the regrouping edit; a text rewrite is marked
+/// precisely so it cannot merge this way (#2517).
 #[test]
 fn page_render_hide_text_block_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
     let dir = workdir("hide-text-block-stale-number");
@@ -8936,11 +8936,7 @@ fn page_render_hide_text_block_refuses_a_paragraph_number_an_earlier_edit_regrou
     let mut a = auto(&dir);
     let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
     ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
-    ok(
-        &mut a,
-        "text_edit",
-        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
-    );
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"dy":-21.2}));
 
     // Paragraph 2 of the listing was Bravo, now inside Alpha's paragraph; position 2 is Charlie.
     let stale = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":2}));

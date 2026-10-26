@@ -218,6 +218,9 @@ mod tests {
         assert_eq!(wrapped("A　　B C", 4.0), ["A　　B", "C"]);
         assert_eq!(wrapped("A\u{a0}B C", 3.0), ["A B", "C"]);
         assert_eq!(wrapped("A\u{2028}B C", 3.0), ["A B", "C"]);
+        // `wrap` treats every whitespace character, including `\r`, as a separator to keep
+        // (#4199); the caller turns `\r\n` and `\r` into `\n` before calling it.
+        assert_eq!(wrapped(" \tA  B\r\nC ", 3.0), ["  A", "B ", "C "]);
     }
 
     #[test]
