@@ -525,8 +525,11 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         }
                         match selected {
                             Some((page, index, _)) => {
+                                // One undo step for what one choice changed (Border ▸ None takes a
+                                // circle's line and its shape).
+                                let mut edits = Vec::new();
                                 if border.width != was.width {
-                                    app.apply_edit(Edit::StyleAnnotation {
+                                    edits.push(Edit::StyleAnnotation {
                                         page,
                                         index,
                                         color: None,
@@ -536,10 +539,15 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                                     });
                                 }
                                 if border.color != was.color {
-                                    app.apply_edit(Edit::BorderColorAnnotation { page, index, color: border.color });
+                                    edits.push(Edit::BorderColorAnnotation { page, index, color: border.color });
                                 }
                                 if border.shape != was.shape {
-                                    app.apply_edit(Edit::BorderShapeAnnotation { page, index, shape: border.shape });
+                                    edits.push(Edit::BorderShapeAnnotation { page, index, shape: border.shape });
+                                }
+                                if edits.len() > 1 {
+                                    app.apply_edit(Edit::Batch { label: "Change comment properties".into(), edits });
+                                } else if let Some(edit) = edits.pop() {
+                                    app.apply_edit(edit);
                                 }
                             }
                             None => {

@@ -466,6 +466,12 @@ fn no_border_takes_the_oval_or_circle_away_too() {
     no_border(&mut h);
     assert_eq!(props(&h).width, Some(0.0));
     assert_eq!(props(&h).border_shape.unwrap_or_default(), BorderShape::Rectangle);
+    // One undo step brings back the line and the circle together.
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!((props(&h).width, props(&h).border_shape), (Some(1.0), Some(BorderShape::Circle)), "one undo step");
+    h.state_mut().redo();
+    h.run_steps(2);
     assert_eq!(h.state().fill_text_border_shape, BorderShape::Circle, "new text keeps its circle");
     // New text: none, and a rectangle when a border is chosen again.
     h.state_mut().views[0].comments.selected = None;
