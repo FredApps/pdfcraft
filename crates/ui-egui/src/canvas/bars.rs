@@ -518,6 +518,11 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                                 .response
                                 .on_hover_text(tl!("Border shape"));
                         }
+                        // No border, no shape: an oval or a circle left without its line would
+                        // keep its box grown around a shape that isn't drawn.
+                        if border.width <= 0.0 {
+                            border.shape = pdfcraft_engine::BorderShape::Rectangle;
+                        }
                         match selected {
                             Some((page, index, _)) => {
                                 if border.width != was.width {

@@ -432,6 +432,48 @@ fn typed_text_takes_an_oval_or_a_circle_from_the_toolbar() {
     assert_eq!(restored.fill_text_border_shape, BorderShape::Oval, "an unknown shape keeps the setting");
 }
 
+/// Border ▸ None takes an oval or a circle away with its line, from the selected text and for new
+/// text: without one, the text's box stayed grown around a shape that isn't drawn.
+#[test]
+fn no_border_takes_the_oval_or_circle_away_too() {
+    use pdfcraft_engine::BorderShape;
+    let mut h = harness();
+    h.state_mut().execute("sign.fill.text");
+    h.state_mut().fill_text_border = 1.0;
+    h.state_mut().fill_text_border_shape = BorderShape::Circle;
+    h.run_steps(2);
+    click(&mut h, 50.0, 250.0);
+    h.event(egui::Event::Text("12".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let (page, index) = {
+        let s = h.state();
+        let a = s.session.get(s.views[0].id).unwrap().info.annotations.iter().find(|a| a.contents.as_deref() == Some("12")).cloned().unwrap();
+        (a.page, a.index)
+    };
+    let props = |h: &Harness<'static, PdfCraftApp>| h.state().session.get(h.state().views[0].id).unwrap().comment_props(page, index).unwrap();
+    assert_eq!(props(&h).border_shape, Some(BorderShape::Circle));
+    let no_border = |h: &mut Harness<'static, PdfCraftApp>| {
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("1 pt")).expect("the Border control").click();
+        h.run_steps(2);
+        h.get_by_label("None").click();
+        h.run_steps(4);
+    };
+    // The selected text: no line, and a rectangle again, its box the text's.
+    h.state_mut().views[0].comments.selected = Some((page, index));
+    h.run_steps(3);
+    no_border(&mut h);
+    assert_eq!(props(&h).width, Some(0.0));
+    assert_eq!(props(&h).border_shape.unwrap_or_default(), BorderShape::Rectangle);
+    assert_eq!(h.state().fill_text_border_shape, BorderShape::Circle, "new text keeps its circle");
+    // New text: none, and a rectangle when a border is chosen again.
+    h.state_mut().views[0].comments.selected = None;
+    h.run_steps(3);
+    no_border(&mut h);
+    assert_eq!((h.state().fill_text_border, h.state().fill_text_border_shape), (0.0, BorderShape::Rectangle));
+}
+
 /// The Border control puts a frame around new Fill & Sign text, and around the text that is
 /// selected; the box grows outwards, so the text stays where it was typed. The choice persists.
 #[test]
