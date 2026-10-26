@@ -553,22 +553,24 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         let (r, _) = ui.allocate_exact_size(vec2(32.0, 9.0), Sense::hover());
                         ui.painter().hline(r.x_range().shrink(6.0), r.center().y, Stroke::new(1.0, t.divider));
                         // Text boxes and callouts: the border's own colour, for new ones and the
-                        // selected one this tool made.
+                        // selected one this tool made. With one selected the button shows its
+                        // colours (Comment Properties may have changed them), else the tool's.
                         if tool.has_border_color() {
                             let style = app.comment_prefs.style(tool);
-                            if let Some(color) = comments::border_colour_button(ui, style.border_color, style.color) {
+                            let selected = app.active_ids().and_then(|(index, id)| {
+                                let (page, annotation) = app.views.get(index)?.comments.selected?;
+                                let doc = app.session.get(id)?;
+                                let made = doc.allows_annotation()
+                                    && doc.info.annotations.iter().any(|a| a.page == page && a.index == annotation && comments::made_by(a, tool));
+                                made.then(|| (page, annotation, doc.comment_props(page, annotation)))
+                            });
+                            let (shown, text) = match selected.as_ref().and_then(|(.., p)| p.as_ref()) {
+                                Some(p) => (p.border_color, p.color.unwrap_or(style.color)),
+                                None => (style.border_color, style.color),
+                            };
+                            if let Some(color) = comments::border_colour_button(ui, shown, text) {
                                 app.comment_prefs.set_border_color(tool, color);
-                                if let Some((index, id)) = app.active_ids()
-                                    && let Some((page, annotation)) = app.views.get(index).and_then(|view| view.comments.selected)
-                                    && app.session.get(id).is_some_and(|doc| {
-                                        doc.allows_annotation()
-                                            && doc
-                                                .info
-                                                .annotations
-                                                .iter()
-                                                .any(|a| a.page == page && a.index == annotation && comments::made_by(a, tool))
-                                    })
-                                {
+                                if let Some((page, annotation, _)) = selected {
                                     app.apply_edit(Edit::BorderColorAnnotation { page, index: annotation, color });
                                 }
                             }

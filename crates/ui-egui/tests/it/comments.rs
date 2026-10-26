@@ -1994,6 +1994,47 @@ fn a_text_box_made_default_gives_the_tool_its_border_colour() {
     assert_eq!(h.state().comment_prefs.style(CommentTool::TextBox).border_color, red);
 }
 
+/// The Text box tool's Border colour button shows the selected text box's own border colour
+/// (Comment Properties may have given it one), and the tool's again with none selected.
+#[test]
+fn the_border_colour_button_shows_the_selected_text_boxs_colour() {
+    use pdfcraft_engine::{Edit, NewAnnotation, Shape, Style};
+    let mut h = harness(|app| app.set_option("quick", "freetext").unwrap());
+    let shape = Shape::TextBox { rect: [100.0, 600.0, 220.0, 630.0], font_size: 12.0 };
+    let style = Style { width: 1.0, ..Style::default_for(&shape) };
+    assert!(h.state_mut().apply_edit(Edit::AddAnnotation(NewAnnotation {
+        page: 0,
+        shape,
+        style,
+        contents: "Framed".into(),
+        author: "Tester".into()
+    })));
+    h.run_steps(2);
+    let index = comments(&h).iter().find(|a| a.contents.as_deref() == Some("Framed")).map(|a| a.index).expect("the text box");
+    // A border colour of its own, which the tool doesn't have.
+    assert!(h.state_mut().apply_edit(Edit::BorderColorAnnotation { page: 0, index, color: Some([0.0, 0.47, 0.84]) }));
+    h.run_steps(2);
+    // The colour the button's square is drawn in.
+    let shown = |h: &Harness<'static, PdfCraftApp>| {
+        let button = h.get_by_label("Border colour").rect();
+        h.output().shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.stroke.width == 3.0 && button.contains_rect(r.rect) => Some(r.stroke.color),
+            _ => None,
+        })
+    };
+    // A new text box comes selected.
+    h.state_mut().views[0].comments.selected = None;
+    h.run_steps(3);
+    let tool = shown(&h).expect("the button's square");
+    h.state_mut().views[0].comments.selected = Some((0, index));
+    h.run_steps(3);
+    let own = shown(&h).expect("the button's square");
+    assert!(own != tool && own.b() > 200 && own.r() < 30, "the selected text box's blue: {own:?}, the tool's {tool:?}");
+    h.state_mut().views[0].comments.selected = None;
+    h.run_steps(3);
+    assert_eq!(shown(&h), Some(tool), "the tool's colour again");
+}
+
 /// #1302: making an arrow's properties the default updates the Arrow tool, not later plain lines.
 #[test]
 fn an_arrows_default_does_not_restyle_lines() {
