@@ -511,6 +511,36 @@ fn a_circle_touching_its_text_box_keeps_following_its_text() {
     assert!(rd(&doc).iter().all(|x| *x >= 0.0), "{:?}", rd(&doc));
 }
 
+/// On a page turned a quarter, typed text is laid out as the page is shown (`/PCTextRotate`), and a
+/// circle made with it goes around the text as shown: as large as around the same text on an
+/// upright page. (Made before the turn was set, its text wrapped at the box's displayed height and
+/// the circle went around several lines.)
+#[test]
+fn a_circle_made_on_a_turned_page_is_sized_as_on_an_upright_one() {
+    let w = appearance::text_width("12345", 10.0);
+    let typed = |rect: [f64; 4]| {
+        let mut t = new(0, Shape::Typewriter { rect, font_size: 10.0 });
+        (t.contents, t.style.width, t.style.border_shape) = ("12345".into(), 1.0, BorderShape::Circle);
+        t
+    };
+    let size = |doc: &Document, i: usize| {
+        let r = rect(&list(doc, 0)[i]);
+        (r[2] - r[0], r[3] - r[1])
+    };
+    let mut upright = fixture();
+    let u = add_annotation(&mut upright, &typed([100.0, 680.0, 110.0 + w, 700.0]), &meta("u")).unwrap();
+    for turn in [90, 270] {
+        let mut doc = fixture();
+        let page = page_refs(&doc).unwrap()[0];
+        doc.update_dict(page, |d| d.set(b"Rotate".to_vec(), Object::Int(turn))).unwrap();
+        // The same box as shown: its sides swapped in user space.
+        let t = add_annotation(&mut doc, &typed([100.0, 680.0, 120.0, 690.0 + w]), &meta("t")).unwrap();
+        assert_eq!(list(&doc, 0)[t].get(b"PCTextRotate").and_then(Object::as_int), Some(turn));
+        let (turned, straight) = (size(&doc, t), size(&upright, u));
+        assert!((turned.0 - straight.0).abs() < 0.01 && (turned.1 - straight.1).abs() < 0.01, "{turn}°: {turned:?}, upright {straight:?}");
+    }
+}
+
 #[test]
 fn shapes_can_be_filled_and_unfilled() {
     let mut doc = fixture();
