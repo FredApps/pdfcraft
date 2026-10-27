@@ -27,6 +27,7 @@ pub(super) mod image_pick;
 mod navigation;
 mod organize;
 pub(super) mod page_pointer;
+mod rulers;
 pub mod scroll_speed;
 mod selection;
 pub(super) mod signature_drag;
@@ -2652,6 +2653,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
     }
+    // Rulers overlay the final document viewport and consume the same snapped transforms that
+    // painted the visible pages. They never participate in page layout or scroll sizing.
+    rulers::paint(app, index, ui);
 }
 
 /// The prepare-mode field menu's choices.
