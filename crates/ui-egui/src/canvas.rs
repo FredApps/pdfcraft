@@ -1762,6 +1762,7 @@ fn draw_pages(
     env: &PageEnv<'_>,
     out: &mut PageOut,
     signature_preview: &mut Option<(crate::fill_sign::SavedSig, egui::TextureHandle)>,
+    rulers_enabled: bool,
 ) -> PageRenders {
     let PageEnv {
         allowed,
@@ -1832,8 +1833,10 @@ fn draw_pages(
     view.screen_rects.clear();
     view.screen_xforms.clear();
     // The pointer as the pages see it: nothing over them (a dialog from the frame it opens),
-    // or a press they hold. The page modules read it rather than egui's raw pointer state.
-    let ptr = PagePointer::read(ui, &resp, modal);
+    // or a press they hold. Ruler chrome can acquire no page gesture, while a gesture that
+    // began on a page remains held when it crosses a ruler.
+    let blocked = rulers::blocked_rects(rulers_enabled, view.presentation.is_some(), view.organize, visible);
+    let ptr = PagePointer::read_excluding(ui, &resp, modal, &blocked);
     let pointer = ptr.pos;
     // A press on a page makes it the current one (as in Acrobat), so a page command with
     // no selection (Rotate, Delete) acts on the page the reader pointed at, not on a page
@@ -2839,6 +2842,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         (app.left_open && app.left == crate::LeftPanel::Tool("edit")) || matches!(app.quick_tool, QuickTool::AddText | QuickTool::EditText);
     let text_style = app.text_style.clone();
     let show_secured_notice = app.show_secured_notice;
+    let rulers_enabled = app.show_rulers && app.views[index].presentation.is_none() && !app.views[index].organize;
     let view = &mut app.views[index];
     // Opened without the owner password and something is restricted. The notice says so unless
     // the user turned it off (#4035): the restrictions themselves, and Document Properties ▸
@@ -3037,7 +3041,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     };
     let mut page_out = PageOut::default();
     let out = page_scroll(ui, scroll, egui::Id::unique(("page-view-scope", view.id)), |ui, viewport| {
-        draw_pages(ui, viewport, view, &env, &mut page_out, &mut app.signature_preview)
+        draw_pages(ui, viewport, view, &env, &mut page_out, &mut app.signature_preview, rulers_enabled)
     });
     let PageOut {
         canvas_action,
