@@ -100,6 +100,15 @@ impl RulerLayout {
     }
 }
 
+/// Ruler chrome that excludes page gestures for an ordinary document viewport.
+pub(super) fn blocked_rects(enabled: bool, presentation: bool, organize: bool, viewport: Rect) -> Vec<Rect> {
+    if !enabled || presentation || organize || !viewport.is_positive() {
+        return Vec::new();
+    }
+    let layout = RulerLayout::new(viewport);
+    vec![layout.corner, layout.horizontal, layout.vertical]
+}
+
 pub(super) fn paint(app: &PdfCraftApp, index: usize, ui: &egui::Ui) {
     let Some(view) = app.views.get(index) else { return };
     if !app.show_rulers || view.presentation.is_some() || view.organize {
@@ -260,5 +269,16 @@ mod tests {
         assert_eq!(layout.corner.min, viewport.min);
         assert_eq!(layout.horizontal.right(), viewport.right());
         assert_eq!(layout.vertical.bottom(), viewport.bottom());
+    }
+
+    #[test]
+    fn blocked_rects_match_the_painted_bands_only_when_eligible() {
+        let viewport = Rect::from_min_size(pos2(10.0, 20.0), vec2(800.0, 600.0));
+        let layout = RulerLayout::new(viewport);
+        assert_eq!(blocked_rects(true, false, false, viewport), vec![layout.corner, layout.horizontal, layout.vertical]);
+        assert!(blocked_rects(false, false, false, viewport).is_empty());
+        assert!(blocked_rects(true, true, false, viewport).is_empty());
+        assert!(blocked_rects(true, false, true, viewport).is_empty());
+        assert!(blocked_rects(true, false, false, Rect::NOTHING).is_empty());
     }
 }

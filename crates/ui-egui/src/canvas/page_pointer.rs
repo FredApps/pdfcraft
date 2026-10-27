@@ -48,12 +48,6 @@ pub(crate) struct PagePointer {
 }
 
 impl PagePointer {
-    /// The pointer for `resp`, the content widget that holds every page, allocated in `ui`, while
-    /// a dialog is open over the window or not (`modal`).
-    pub(crate) fn read(ui: &egui::Ui, resp: &egui::Response, modal: bool) -> Self {
-        Self::read_excluding(ui, resp, modal, &[])
-    }
-
     /// The page pointer with gestures that begin in `blocked` retained as blocked through every
     /// egui pass of their release frame. A new frame clears the retained block.
     pub(crate) fn read_excluding(ui: &egui::Ui, resp: &egui::Response, modal: bool, blocked: &[Rect]) -> Self {
