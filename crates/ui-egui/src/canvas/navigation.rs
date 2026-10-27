@@ -138,7 +138,7 @@ impl DocView {
             DestView::Top => return,
             DestView::Xyz { left, top, zoom } => {
                 if let Some(z) = zoom {
-                    self.zoom = z.clamp(0.08, 64.0);
+                    self.zoom = z.clamp(*super::zoom::DOCUMENT_ZOOM_RANGE.start(), *super::zoom::DOCUMENT_ZOOM_RANGE.end());
                     self.fit = Fit::None;
                     self.zoom_anchor = None;
                 }
@@ -168,7 +168,9 @@ impl DocView {
                 let (dw, dh) = self.display_size(p);
                 let (w, h) = ((ax - bx).abs() * dw, (ay - by).abs() * dh);
                 if w >= 1.0 && h >= 1.0 && self.viewport_w >= 1.0 && self.viewport_h >= 1.0 {
-                    self.zoom = (self.viewport_w / (w * PT)).min(self.viewport_h / (h * PT)).clamp(0.08, 64.0);
+                    self.zoom = (self.viewport_w / (w * PT))
+                        .min(self.viewport_h / (h * PT))
+                        .clamp(*super::zoom::DOCUMENT_ZOOM_RANGE.start(), *super::zoom::DOCUMENT_ZOOM_RANGE.end());
                     self.fit = Fit::None;
                     self.zoom_anchor = None;
                 }

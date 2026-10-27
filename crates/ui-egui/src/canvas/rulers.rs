@@ -47,10 +47,10 @@ struct CanvasGeometry {
 }
 
 impl CanvasGeometry {
-    fn from_view(view: &DocView, pointer: Option<Pos2>) -> Self {
+    fn from_view(view: &DocView) -> Self {
         let viewport_rect = view.viewport_screen;
         let pages: Vec<_> = view.screen_xforms.iter().map(|(page, xf)| VisiblePageGeometry::from_xform(*page, *xf)).collect();
-        let active_page_index = active_page_geometry(viewport_rect, &pages, pointer).map(|page| page.page_index);
+        let active_page_index = active_page_geometry(viewport_rect, &pages).map(|page| page.page_index);
         Self { viewport_rect, pages, active_page_index }
     }
 
@@ -60,14 +60,9 @@ impl CanvasGeometry {
     }
 }
 
-fn active_page_geometry(viewport: Rect, pages: &[VisiblePageGeometry], pointer: Option<Pos2>) -> Option<&VisiblePageGeometry> {
+fn active_page_geometry(viewport: Rect, pages: &[VisiblePageGeometry]) -> Option<&VisiblePageGeometry> {
     if !viewport.is_positive() {
         return None;
-    }
-    if let Some(pointer) = pointer.filter(|point| viewport.contains(*point))
-        && let Some(page) = pages.iter().find(|page| page.page_rect.contains(pointer))
-    {
-        return Some(page);
     }
     if let Some(page) = pages.iter().find(|page| page.page_rect.contains(viewport.center())) {
         return Some(page);
@@ -115,7 +110,7 @@ pub(super) fn paint(app: &PdfCraftApp, index: usize, ui: &egui::Ui) {
         return;
     }
     let pointer = ui.ctx().pointer_hover_pos();
-    let geometry = CanvasGeometry::from_view(view, pointer);
+    let geometry = CanvasGeometry::from_view(view);
     if geometry.pages.is_empty() || !geometry.viewport_rect.is_positive() {
         return;
     }
@@ -267,20 +262,22 @@ mod tests {
     }
 
     #[test]
-    fn facing_pages_keep_one_axis_when_the_pointer_changes_pages() {
-        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1_000.0, 900.0));
+    fn mixed_facing_pages_use_one_deterministic_ruler_page() {
+        // The viewport centre is in the gutter, and both pages have equal visible area. The lower
+        // page index wins independently of pointer position, page size, rotation, or axis scale.
+        let viewport = Rect::from_min_max(Pos2::ZERO, pos2(802.0, 700.0));
         let left = page(0, Rect::from_min_size(pos2(100.0, 100.0), vec2(300.0, 400.0)), 0, vec2(600.0, 800.0));
-        let right = page(1, Rect::from_min_size(pos2(402.0, 100.0), vec2(300.0, 400.0)), 0, vec2(600.0, 800.0));
+        let right = page(1, Rect::from_min_size(pos2(402.0, 100.0), vec2(300.0, 400.0)), 90, vec2(800.0, 400.0));
+        let pages = [left, right];
 
-        let axes = [0, 1].map(|active_page_index| {
-            let geometry = CanvasGeometry { viewport_rect: viewport, pages: vec![left, right], active_page_index: Some(active_page_index) };
-            ruler_axes(&geometry).expect("facing-page axes")
-        });
-        assert_eq!(axes[0], axes[1], "pointer-driven active-page changes must not change a spread ruler");
-        assert_eq!((axes[0].horizontal_start, axes[0].horizontal_length), (-600.0, 1_200.0));
-        assert_eq!(axes[0].horizontal_origin, 401.0);
-        assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_200.0, 0.5, false), (101.0, 1_200.0));
-        assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_200.0, 0.5, true), (401.0, 1_200.0));
+        let active = active_page_geometry(viewport, &pages).expect("a deterministic ruler page");
+        assert_eq!(active.page_index, 0);
+        let geometry = CanvasGeometry { viewport_rect: viewport, pages: pages.to_vec(), active_page_index: Some(active.page_index) };
+        let axes = ruler_axes(&geometry).expect("facing-page axes");
+        assert_eq!((axes.horizontal_start, axes.horizontal_length), (-600.0, 1_000.0));
+        assert_eq!(axes.horizontal_origin, 401.0);
+        assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_000.0, 0.5, false), (101.0, 1_000.0));
+        assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_000.0, 0.5, true), (401.0, 1_000.0));
     }
 
     #[test]

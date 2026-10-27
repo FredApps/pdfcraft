@@ -1,5 +1,8 @@
 use super::{DocInfo, DocView, Fit, GAP, MARGIN, PT, PageLayout, Pos2, Rect, SIDE, SavedDisplay, Vec2, device_pixels, pos2, vec2};
 
+/// The supported document zoom range: 1% through 6400%.
+pub const DOCUMENT_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.01..=64.0;
+
 /// The page grid's zoom range and the step of its buttons and keys.
 pub const GRID_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.5..=3.0;
 
@@ -155,7 +158,7 @@ impl DocView {
         let Some((page, pr)) = self.screen_rects.iter().find(|(_, pr)| pr.contains(r.center())).copied() else { return };
         let k = (self.viewport_screen.width() / r.width().max(1.0)).min(self.viewport_screen.height() / r.height().max(1.0));
         let f = (r.center() - pr.min) / pr.size();
-        self.zoom = (self.zoom * k).clamp(0.01, 64.0);
+        self.zoom = (self.zoom * k).clamp(*DOCUMENT_ZOOM_RANGE.start(), *DOCUMENT_ZOOM_RANGE.end());
         self.fit = Fit::None;
         self.zoom_anchor = Some((page, f.x.clamp(0.0, 1.0), f.y.clamp(0.0, 1.0), self.viewport_screen.center() - self.viewport_screen.min));
     }
@@ -168,7 +171,7 @@ impl DocView {
         let Some((_, pr)) = self.screen_rects.iter().find(|(p, _)| *p == page).copied() else { return false };
         let w = (content[2] - content[0]).max(0.01) * pr.width();
         let k = (self.viewport_screen.width() - 2.0 * PAD).max(50.0) / w.max(1.0);
-        self.zoom = (self.zoom * k).clamp(0.01, 64.0);
+        self.zoom = (self.zoom * k).clamp(*DOCUMENT_ZOOM_RANGE.start(), *DOCUMENT_ZOOM_RANGE.end());
         self.fit = Fit::None;
         self.zoom_anchor = Some((page, content[0].clamp(0.0, 1.0), content[1].clamp(0.0, 1.0), vec2(PAD, MARGIN)));
         true
@@ -216,7 +219,7 @@ impl DocView {
         if !zoom.is_finite() || !screen_pos.is_finite() {
             return;
         }
-        let zoom = zoom.clamp(0.01, 64.0);
+        let zoom = zoom.clamp(*DOCUMENT_ZOOM_RANGE.start(), *DOCUMENT_ZOOM_RANGE.end());
         if zoom == self.zoom && self.fit == Fit::None {
             return;
         }
@@ -301,7 +304,7 @@ impl DocView {
             Fit::Height => self.zoom = (self.viewport_h - 2.0 * MARGIN) / (h * PT),
             Fit::None => {}
         }
-        self.zoom = self.zoom.clamp(0.01, 64.0);
+        self.zoom = self.zoom.clamp(*DOCUMENT_ZOOM_RANGE.start(), *DOCUMENT_ZOOM_RANGE.end());
     }
 
     /// Width of the scroll content. Single-page view sizes it to the page it shows, so a

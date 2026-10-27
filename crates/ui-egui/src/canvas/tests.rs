@@ -1837,6 +1837,10 @@ fn destinations_set_the_zoom_mode_and_the_point_to_show() {
     // A zoom beyond the view's range is clamped to it.
     v.go_to_dest(0, DestView::Xyz { left: None, top: None, zoom: Some(1e30) }, &info);
     assert_eq!((v.zoom, v.goto_point), (64.0, None));
+    v.go_to_dest(0, DestView::Xyz { left: None, top: None, zoom: Some(0.001) }, &info);
+    assert_eq!(v.zoom, 0.01);
+    v.go_to_dest(0, DestView::Xyz { left: None, top: None, zoom: Some(0.04) }, &info);
+    assert_eq!(v.zoom, 0.04);
     v.go_to_dest(0, DestView::Fit, &info);
     assert_eq!((v.fit, v.goto_point), (Fit::Page, None));
     v.go_to_dest(0, DestView::FitH { top: Some(100.0) }, &info);
