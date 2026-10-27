@@ -136,7 +136,7 @@ fn paint_rulers(ui: &egui::Ui, layout: RulerLayout, axes: RulerAxes, viewport: R
     // rulers describe the viewport (a facing spread starts at its left edge). Once an axis fills
     // 72% of its ruler, it becomes page-relative; a facing spread then uses its fixed spine as
     // zero, with negative coordinates on the left and positive coordinates on the right.
-    let horizontal_relative = axes.rendered_width >= f64::from(layout.horizontal.width()) * 0.72;
+    let horizontal_relative = axes.horizontal_length * axes.scale_x >= f64::from(layout.horizontal.width()) * 0.72;
     let vertical_relative = axes.vertical_length * axes.scale_y >= f64::from(layout.vertical.height()) * 0.72;
     let (mut horizontal_origin, horizontal_length) =
         horizontal_ruler_axis(axes.horizontal_origin, axes.horizontal_start, axes.horizontal_length, axes.scale_x, horizontal_relative);
@@ -311,6 +311,14 @@ mod tests {
         assert!((axes.scale_x - 0.5).abs() < f64::EPSILON);
         assert!((wider_gap_axes.scale_x - axes.scale_x).abs() < f64::EPSILON);
         assert_eq!(wider_gap_axes.rendered_width, 512.0);
+
+        // The gap is screen chrome, not document width. Increasing only the gap
+        // must not switch the horizontal ruler into page-relative mode.
+        let ruler_width = 700.0_f64;
+        let relative_threshold = ruler_width * 0.72;
+        assert!(axes.horizontal_length * axes.scale_x < relative_threshold);
+        assert!(wider_gap_axes.horizontal_length * wider_gap_axes.scale_x < relative_threshold);
+        assert!(wider_gap_axes.rendered_width >= relative_threshold);
         let left_edge = axes.horizontal_origin + axes.horizontal_start * axes.scale_x;
         let right_edge = left_edge + axes.horizontal_length * axes.scale_x;
         assert!((left_edge - 100.0).abs() < 1e-9);
