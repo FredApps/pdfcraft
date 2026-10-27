@@ -137,20 +137,20 @@ struct RulerAxes {
 }
 
 fn paint_rulers(ui: &egui::Ui, layout: RulerLayout, axes: RulerAxes, viewport: Rect, units: Unit, pointer: Option<Pos2>) {
+    // Preserve the feature branch's deterministic ruler policy. At small rendered sizes the
+    // rulers describe the viewport (a facing spread starts at its left edge). Once an axis fills
+    // 72% of its ruler, it becomes page-relative; a facing spread then uses its fixed spine as
+    // zero, with negative coordinates on the left and positive coordinates on the right.
     let horizontal_relative = axes.rendered_width >= f64::from(layout.horizontal.width()) * 0.72;
     let vertical_relative = axes.vertical_length * axes.scale_y >= f64::from(layout.vertical.height()) * 0.72;
-    let mut horizontal_origin = axes.horizontal_origin;
-    let mut horizontal_length = axes.horizontal_length;
-    let mut vertical_origin = axes.vertical_origin;
-    let mut vertical_length = axes.vertical_length;
-    if !horizontal_relative {
-        horizontal_origin = f64::from(viewport.left());
-        horizontal_length = f64::from(layout.horizontal.width()) / axes.scale_x.max(f64::EPSILON);
-    }
-    if !vertical_relative {
-        vertical_origin = f64::from(viewport.top());
-        vertical_length = f64::from(layout.vertical.height()) / axes.scale_y.max(f64::EPSILON);
-    }
+    let (mut horizontal_origin, horizontal_length) =
+        horizontal_ruler_axis(axes.horizontal_origin, axes.horizontal_start, axes.horizontal_length, axes.scale_x, horizontal_relative);
+    horizontal_origin = snap_ruler_coordinate(horizontal_origin, ui.ctx().pixels_per_point());
+    let (vertical_origin, vertical_length) = if vertical_relative {
+        (snap_ruler_coordinate(axes.vertical_origin, ui.ctx().pixels_per_point()), axes.vertical_length)
+    } else {
+        (f64::from(layout.vertical.top()), f64::from(layout.vertical.height()) / axes.scale_y.max(f64::EPSILON))
+    };
     let pointer = pointer.filter(|point| viewport.contains(*point));
     ruler::paint_corner(ui, layout.corner, units);
     ruler::paint_ruler(
@@ -158,7 +158,7 @@ fn paint_rulers(ui: &egui::Ui, layout: RulerLayout, axes: RulerAxes, viewport: R
         RulerPaintInput {
             orientation: RulerOrientation::Horizontal,
             rect: layout.horizontal,
-            page_origin: horizontal_origin - axes.horizontal_start * axes.scale_x,
+            page_origin: horizontal_origin,
             page_length_pdf_points: horizontal_length,
             screen_points_per_pdf_point: axes.scale_x,
             unit: units,
@@ -177,6 +177,21 @@ fn paint_rulers(ui: &egui::Ui, layout: RulerLayout, axes: RulerAxes, viewport: R
             pointer_screen_position: pointer.map(|point| f64::from(point.y)),
         },
     );
+}
+
+/// Selects the feature branch's horizontal ruler origin without involving the pointer.
+fn horizontal_ruler_axis(page_origin: f64, page_start: f64, page_length: f64, scale: f64, page_relative: bool) -> (f64, f64) {
+    if page_start < 0.0 && !page_relative { (page_origin + page_start * scale, page_length) } else { (page_origin, page_length) }
+}
+
+/// Snaps a ruler coordinate to the same physical-pixel grid used by page rectangles.
+fn snap_ruler_coordinate(value: f64, pixels_per_point: f32) -> f64 {
+    let pixels_per_point = f64::from(pixels_per_point);
+    if value.is_finite() && pixels_per_point.is_finite() && pixels_per_point > 0.0 {
+        (value * pixels_per_point).round() / pixels_per_point
+    } else {
+        value
+    }
 }
 
 fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
@@ -252,14 +267,20 @@ mod tests {
     }
 
     #[test]
-    fn facing_pages_share_a_signed_horizontal_axis() {
+    fn facing_pages_keep_one_axis_when_the_pointer_changes_pages() {
         let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1_000.0, 900.0));
         let left = page(0, Rect::from_min_size(pos2(100.0, 100.0), vec2(300.0, 400.0)), 0, vec2(600.0, 800.0));
         let right = page(1, Rect::from_min_size(pos2(402.0, 100.0), vec2(300.0, 400.0)), 0, vec2(600.0, 800.0));
-        let geometry = CanvasGeometry { viewport_rect: viewport, pages: vec![left, right], active_page_index: Some(0) };
-        let axes = ruler_axes(&geometry).expect("facing-page axes");
-        assert_eq!((axes.horizontal_start, axes.horizontal_length), (-600.0, 1_200.0));
-        assert_eq!(axes.horizontal_origin, 401.0);
+
+        let axes = [0, 1].map(|active_page_index| {
+            let geometry = CanvasGeometry { viewport_rect: viewport, pages: vec![left, right], active_page_index: Some(active_page_index) };
+            ruler_axes(&geometry).expect("facing-page axes")
+        });
+        assert_eq!(axes[0], axes[1], "pointer-driven active-page changes must not change a spread ruler");
+        assert_eq!((axes[0].horizontal_start, axes[0].horizontal_length), (-600.0, 1_200.0));
+        assert_eq!(axes[0].horizontal_origin, 401.0);
+        assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_200.0, 0.5, false), (101.0, 1_200.0));
+        assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_200.0, 0.5, true), (401.0, 1_200.0));
     }
 
     #[test]
