@@ -2877,3 +2877,4 @@ theme	Appearance	Išvaizda
 	No image on clipboard to paste	Iškarpinėje nėra paveikslėlio įklijuoti
 	Pinned {tool} to Home	{tool} prisegtas pradžios puslapyje
 	Unpinned {tool} from Home	{tool} atsegtas nuo pradžios puslapio
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	Parašo šriftas negali atvaizduoti simbolio „{c}“ ({code}). Įveskite jį lotyniškomis, kirilicos ar graikiškomis raidėmis arba naudokite „Brėžti“ ar „Paveikslėlis“.

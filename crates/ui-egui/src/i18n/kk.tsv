@@ -2615,3 +2615,4 @@ animation effects	Off	Өшірулі
 	No image on clipboard to paste	Алмасу буферінде қоятын сурет жоқ
 	Pinned {tool} to Home	{tool} басты бетке бекітілді
 	Unpinned {tool} from Home	{tool} басты беттен ажыратылды
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	Қолтаңба қарпі «{c}» таңбасын ({code}) сала алмайды. Оны латын, кирилл немесе грек әріптерімен жазыңыз немесе «Салу» не «Кескін» қойындысын пайдаланыңыз.

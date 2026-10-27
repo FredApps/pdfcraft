@@ -2924,3 +2924,4 @@ certificate	Version	Verze
 	No image on clipboard to paste	Ve schránce není obrázek k vložení
 	Pinned {tool} to Home	{tool} připnuto na úvodní stránku
 	Unpinned {tool} from Home	{tool} odepnuto z úvodní stránky
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	Písmo podpisu neumí vykreslit „{c}“ ({code}). Napište jej latinkou, cyrilicí nebo řeckým písmem, nebo použijte „Kreslení“ či „Obrázek“.
