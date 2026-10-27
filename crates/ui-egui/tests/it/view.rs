@@ -275,6 +275,7 @@ fn page_gaps_work_for_mixed_sizes_and_two_page_rows() {
     let (a, b, c) = (rect(&h, 0).unwrap(), rect(&h, 1).unwrap(), rect(&h, 2).unwrap());
     assert!((b.left() - a.right()).abs() < 0.01);
     assert!((c.top() - a.bottom()).abs() < 0.01);
+    assert!((c.left() - a.left()).abs() < 0.01, "the final page keeps the left column without gaps: {a:?} {c:?}");
     let info = h.state().session.get(h.state().views[0].id).unwrap().info.clone();
     h.state_mut().views[0].document_replaced(&info);
     assert!(!h.state().views[0].show_page_gaps, "a file reload preserves the view setting");
@@ -309,6 +310,7 @@ fn two_up_layout_places_pages_side_by_side() {
     assert!(b.min.x > a.max.x, "page 2 right of page 1");
     let c = rect(&h, 2).expect("page 3 on the next row");
     assert!(c.min.y > a.max.y);
+    assert!((c.left() - a.left()).abs() < 1.0, "page 3 uses page 1's left column: {a:?} {c:?}");
 }
 
 #[test]
@@ -2302,4 +2304,47 @@ fn the_pages_panel_tools_are_off_without_page_editing_permission() {
     h.run_steps(3);
     assert!(h.query_by_label("Delete the selected pages").is_none(), "its menu doesn't open");
     assert_eq!(h.state().session.get(id).unwrap().info.pages.len(), 3);
+}
+#[test]
+fn rulers_preserve_two_up_page_geometry() {
+    let mut h = harness(&[("layout", "two-up"), ("zoom", "50")]);
+
+    h.run_steps(4);
+
+    let before = [rect(&h, 0).expect("page 1 before rulers"), rect(&h, 1).expect("page 2 before rulers"), rect(&h, 2).expect("page 3 before rulers")];
+
+    eprintln!("before rulers: {before:#?}");
+
+    assert!((before[2].left() - before[0].left()).abs() < 1.0, "page 3 must occupy page 1's left column before rulers: {before:?}");
+
+    assert!(h.state_mut().execute("view.rulers"));
+    h.run_steps(4);
+
+    let after = [rect(&h, 0).expect("page 1 with rulers"), rect(&h, 1).expect("page 2 with rulers"), rect(&h, 2).expect("page 3 with rulers")];
+
+    eprintln!("with rulers: {after:#?}");
+
+    for page in 0..3 {
+        assert_eq!(after[page], before[page], "rulers must not change page {} geometry", page + 1);
+    }
+
+    assert!((after[2].left() - after[0].left()).abs() < 1.0, "page 3 must occupy page 1's left column with rulers: {after:?}");
+
+    let horizontal_gap_before = before[1].left() - before[0].right();
+    let horizontal_gap_after = after[1].left() - after[0].right();
+
+    assert!((horizontal_gap_before - 2.0).abs() < 0.01, "two-page column gap is {horizontal_gap_before}, expected 2");
+    assert!(
+        (horizontal_gap_after - horizontal_gap_before).abs() < 0.01,
+        "rulers changed horizontal page spacing: before={horizontal_gap_before}, after={horizontal_gap_after}"
+    );
+
+    let vertical_gap_before = before[2].top() - before[0].bottom();
+    let vertical_gap_after = after[2].top() - after[0].bottom();
+
+    assert!((vertical_gap_before - 8.0).abs() <= 0.5, "page-row gap is {vertical_gap_before}, expected 8 within device-pixel snapping");
+    assert!(
+        (vertical_gap_after - vertical_gap_before).abs() < 0.01,
+        "rulers changed vertical page spacing: before={vertical_gap_before}, after={vertical_gap_after}"
+    );
 }

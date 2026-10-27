@@ -70,7 +70,8 @@ pub use zoom::{GRID_ZOOM_RANGE, THUMBNAIL_ZOOM_RANGE};
 
 /// Logical pixels per PDF point at 100% (96 dpi, like browsers).
 pub const PT: f32 = 96.0 / 72.0;
-const GAP: f32 = 14.0;
+const PAGE_ROW_GAP: f32 = 8.0;
+const TWO_UP_COLUMN_GAP: f32 = 2.0;
 const MARGIN: f32 = 28.0;
 /// Horizontal gutter that keeps pages clear of the floating quick-action bar.
 const SIDE: f32 = 70.0;
