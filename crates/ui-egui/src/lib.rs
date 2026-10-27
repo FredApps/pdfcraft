@@ -244,6 +244,8 @@ pub struct PdfCraftApp {
     /// Documents and view). Continuous scrolling at fit width by default, which never snaps
     /// between pages.
     pub view_defaults: canvas::ViewDefaults,
+    /// Whether document rulers overlay the viewport.
+    pub show_rulers: bool,
     /// The unit page sizes and margins are shown in (Preferences ▸ Documents and view).
     pub units: units::Unit,
     /// The Preferences ▸ Date format box while it's being edited, or while it holds an invalid

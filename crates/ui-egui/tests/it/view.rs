@@ -2024,6 +2024,52 @@ fn long_view_menu_fits_a_short_window() {
     assert_eq!(h.state().right, Some(pdfcraft_ui_egui::RightPanel::Bookmarks));
 }
 
+#[test]
+fn rulers_command_requires_an_open_document_and_toggles_global_visibility() {
+    let mut empty = PdfCraftApp::new();
+    assert!(!empty.show_rulers, "rulers start hidden");
+    assert!(!empty.execute("view.rulers"));
+    assert!(!empty.show_rulers, "refusing the command leaves rulers hidden");
+
+    let mut h = harness(&[]);
+    assert!(!h.state().show_rulers, "rulers start hidden");
+    assert!(h.state_mut().execute("view.rulers"));
+    assert!(h.state().show_rulers, "the first command shows rulers");
+    assert!(h.state_mut().execute("view.rulers"));
+    assert!(!h.state().show_rulers, "the second command hides rulers");
+}
+
+#[test]
+fn rulers_option_sets_an_idempotent_headless_state() {
+    let mut app = PdfCraftApp::new();
+    assert!(!app.show_rulers);
+    app.set_option("rulers", "on").unwrap();
+    app.set_option("rulers", "on").unwrap();
+    assert!(app.show_rulers, "repeating on must not toggle rulers off");
+    app.set_option("rulers", "off").unwrap();
+    app.set_option("rulers", "off").unwrap();
+    assert!(!app.show_rulers, "repeating off must not toggle rulers on");
+    assert_eq!(app.set_option("rulers", "sometimes"), Err("rulers must be on or off".into()));
+    assert!(!app.show_rulers, "an invalid value must preserve the current state");
+}
+
+#[test]
+fn ruler_visibility_persists_and_legacy_settings_keep_rulers_hidden() {
+    let mut app = PdfCraftApp::new();
+    app.show_rulers = true;
+    let saved = app.persist();
+
+    let mut restored = PdfCraftApp::new();
+    restored.restore(&saved);
+    assert!(restored.show_rulers, "an explicit ruler choice persists");
+
+    let mut legacy = PdfCraftApp::new();
+    legacy.restore("{}");
+    assert!(!legacy.show_rulers, "legacy settings keep the hidden default");
+    legacy.restore(r#"{"show_rulers":"sometimes"}"#);
+    assert!(!legacy.show_rulers, "an invalid stored value keeps the current choice");
+}
+
 fn click_with(h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2, modifiers: Modifiers) {
     h.hover_at(pos);
     h.run_steps(1);
