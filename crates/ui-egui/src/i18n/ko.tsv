@@ -2846,3 +2846,4 @@ theme	Appearance	모양
 	No image on clipboard to paste	클립보드에 붙여넣을 이미지가 없습니다
 	Pinned {tool} to Home	{tool}을 홈에 고정했습니다
 	Unpinned {tool} from Home	{tool}의 홈 고정을 해제했습니다
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	서명 글꼴은 “{c}”({code})를 그릴 수 없습니다. 라틴, 키릴 또는 그리스 문자로 입력하거나 “그리기” 또는 “이미지”를 사용하세요.

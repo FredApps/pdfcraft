@@ -2601,3 +2601,4 @@ animation effects	Off	Joaktiv
 	No image on clipboard to paste	Nuk ka imazh në kujtesën e përkohshme për të ngjitur
 	Pinned {tool} to Home	{tool} u fiksua te Kreu
 	Unpinned {tool} from Home	{tool} u hoq nga fiksimi te Kreu
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	Fonti i nënshkrimit nuk mund të vizatojë “{c}” ({code}). Shkruajeni me shkronja latine, cirilike ose greke, ose përdorni Vizato ose Imazh.
