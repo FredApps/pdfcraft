@@ -229,14 +229,25 @@ fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
                 )
             }
         });
+    let horizontal_length = f64::from(horizontal_length);
+    let rendered_width = f64::from(rendered_width);
+    // Facing pages are snapped independently, so neither page's rounded scale represents the
+    // complete spread. Derive the horizontal scale from the final outer edges and total PDF width;
+    // this keeps the signed ruler bounded by the displayed spread instead of accumulating one
+    // selected page's rounding error across its partner.
+    let scale_x = if horizontal_length.is_finite() && horizontal_length > 0.0 && rendered_width.is_finite() {
+        rendered_width / horizontal_length
+    } else {
+        f64::from(page.screen_points_per_pdf_point_x)
+    };
     Some(RulerAxes {
         horizontal_origin: f64::from(horizontal_origin),
         horizontal_start: f64::from(horizontal_start),
-        horizontal_length: f64::from(horizontal_length),
-        rendered_width: f64::from(rendered_width),
+        horizontal_length,
+        rendered_width,
         vertical_origin: f64::from(page.page_rect.top()),
         vertical_length: f64::from(page_height_points),
-        scale_x: f64::from(page.screen_points_per_pdf_point_x),
+        scale_x,
         scale_y: f64::from(page.screen_points_per_pdf_point_y),
     })
 }
@@ -278,6 +289,27 @@ mod tests {
         assert_eq!(axes.horizontal_origin, 401.0);
         assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_000.0, 0.5, false), (101.0, 1_000.0));
         assert_eq!(horizontal_ruler_axis(401.0, -600.0, 1_000.0, 0.5, true), (401.0, 1_000.0));
+    }
+
+    #[test]
+    fn facing_spread_scale_uses_the_complete_snapped_span() {
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1_000.0, 900.0));
+        let left = page(0, Rect::from_min_size(pos2(100.0, 100.0), vec2(299.0, 400.0)), 0, vec2(600.0, 800.0));
+        let right = page(1, Rect::from_min_size(pos2(401.0, 100.0), vec2(201.0, 400.0)), 0, vec2(400.0, 800.0));
+        let geometry = CanvasGeometry { viewport_rect: viewport, pages: vec![left, right], active_page_index: Some(0) };
+        let axes = ruler_axes(&geometry).expect("facing-page axes");
+
+        assert_eq!(axes.horizontal_length, 1_000.0);
+        assert_eq!(axes.rendered_width, 502.0);
+        assert!((axes.scale_x - 0.502).abs() < f64::EPSILON);
+        let left_edge = axes.horizontal_origin + axes.horizontal_start * axes.scale_x;
+        let right_edge = left_edge + axes.horizontal_length * axes.scale_x;
+        assert!((right_edge - left_edge - axes.rendered_width).abs() < 1e-9);
+        // One uniform spread scale distributes independent page-rounding differences. It cannot
+        // hit both outer edges and the fixed spine simultaneously, but neither outer-edge error
+        // may exceed the two-point facing-page gutter.
+        assert!((left_edge - 100.0).abs() <= 2.0, "left edge: {left_edge}");
+        assert!((right_edge - 602.0).abs() <= 2.0, "right edge: {right_edge}");
     }
 
     #[test]

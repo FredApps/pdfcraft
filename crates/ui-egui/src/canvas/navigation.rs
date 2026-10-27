@@ -137,7 +137,7 @@ impl DocView {
         let (fx, fy, rel) = match dest {
             DestView::Top => return,
             DestView::Xyz { left, top, zoom } => {
-                if let Some(z) = zoom {
+                if let Some(z) = zoom.filter(|z| z.is_finite() && *z > 0.0) {
                     self.zoom = z.clamp(*super::zoom::DOCUMENT_ZOOM_RANGE.start(), *super::zoom::DOCUMENT_ZOOM_RANGE.end());
                     self.fit = Fit::None;
                     self.zoom_anchor = None;
