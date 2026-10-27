@@ -26,7 +26,7 @@ fn frame_with(ctx: &Context, events: Vec<Event>, area: bool, modal: bool) -> Pag
     let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), events, ..Default::default() };
     let mut output = ctx.run_ui(input, |ui| {
         let (_, resp) = ui.allocate_exact_size(PAGES.size(), Sense::click_and_drag());
-        seen = PagePointer::read(ui, &resp, modal);
+        seen = PagePointer::read_excluding(ui, &resp, modal, &[]);
         if area {
             egui::Area::new(egui::Id::unique("over")).fixed_pos(OVER.min).show(ui.ctx(), |ui| {
                 ui.allocate_exact_size(OVER.size(), Sense::hover());
@@ -321,4 +321,56 @@ fn page_modules_read_the_pointer_only_through_page_pointer() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn a_blocked_press_stays_blocked_through_every_release_pass() {
+    let ctx = Context::default();
+    let blocked = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 20.0));
+    let point = pos2(80.0, 10.0);
+    let mut press = PagePointer::default();
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+        events: vec![Event::PointerMoved(point), button(point, PointerButton::Secondary, true)],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |ui| {
+        let (_, resp) = ui.allocate_exact_size(PAGES.size(), Sense::click_and_drag());
+        press = PagePointer::read_excluding(ui, &resp, false, &[blocked]);
+    });
+    output.textures_delta.clear();
+    assert!(press.blocked_press);
+    assert!(press.pos.is_none());
+
+    let mut passes = Vec::new();
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+        events: vec![button(point, PointerButton::Secondary, false)],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |ui| {
+        let (_, resp) = ui.allocate_exact_size(PAGES.size(), Sense::click_and_drag());
+        passes.push(PagePointer::read_excluding(ui, &resp, false, &[blocked]));
+        if ui.ctx().current_pass_index() == 0 {
+            ui.ctx().request_discard("test blocked ruler release");
+        }
+    });
+    output.textures_delta.clear();
+    assert_eq!(passes.len(), 2);
+    assert!(passes.iter().all(|pointer| pointer.blocked_press && pointer.pos.is_none()));
+
+    let page = pos2(80.0, 40.0);
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+        events: vec![Event::PointerMoved(page)],
+        ..Default::default()
+    };
+    let mut after = PagePointer::default();
+    let mut output = ctx.run_ui(input, |ui| {
+        let (_, resp) = ui.allocate_exact_size(PAGES.size(), Sense::click_and_drag());
+        after = PagePointer::read_excluding(ui, &resp, false, &[blocked]);
+    });
+    output.textures_delta.clear();
+    assert!(!after.blocked_press);
+    assert_eq!(after.pos, Some(page));
 }

@@ -159,6 +159,13 @@ impl PdfCraftApp {
                     _ => return Err("default-page-gaps must be on or off".into()),
                 };
             }
+            ("rulers", _) => {
+                self.show_rulers = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err("rulers must be on or off".into()),
+                };
+            }
             ("cover", Some(v)) => {
                 let on = match value {
                     "on" => true,
