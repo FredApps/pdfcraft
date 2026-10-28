@@ -1,5 +1,6 @@
+use super::input::delete_selected;
 use super::paint::edit_anchor;
-use super::state::{Composer, ComposerKind};
+use super::state::{Composer, ComposerKind, Gesture};
 use super::{
     Annotation, Color32, CommentPrefs, CommentTool, DocInfo, DocView, Edit, Rect, ReviewState, Rgb, SELECT_BLUE, SWATCHES, Sense, Stroke, color32,
     icons, theme, tool_for, vec2,

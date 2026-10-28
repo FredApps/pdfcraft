@@ -28,7 +28,14 @@ fn new_text_typed(v: &crate::DocView) -> bool {
 }
 
 /// Keeps the pages (or comment) the user acted on selected, where they now are.
-fn select_after_edit(view: &mut crate::DocView, edit: Edit, info: &pdfcraft_render::DocInfo, quick_tool: crate::QuickTool) {
+/// `paste_before`: for a paste, the names of the page's comments before it.
+fn select_after_edit(
+    view: &mut crate::DocView,
+    edit: Edit,
+    info: &pdfcraft_render::DocInfo,
+    quick_tool: crate::QuickTool,
+    paste_before: Option<Vec<Option<String>>>,
+) {
     match edit {
         Edit::MovePages { pages, to } => {
             let n = pages.iter().collect::<std::collections::BTreeSet<_>>().len();
@@ -72,12 +79,8 @@ fn select_after_edit(view: &mut crate::DocView, edit: Edit, info: &pdfcraft_rend
         // The copies the paste added (and nothing that was there before): select them all.
         Edit::PasteComments { page, .. } => {
             let before = paste_before.unwrap_or_default();
-            let mut new: Vec<(usize, usize)> = info
-                .annotations
-                .iter()
-                .filter(|x| x.page == page && !x.is_reply() && !before.contains(&x.name))
-                .map(|x| (page, x.index))
-                .collect();
+            let mut new: Vec<(usize, usize)> =
+                info.annotations.iter().filter(|x| x.page == page && !x.is_reply() && !before.contains(&x.name)).map(|x| (page, x.index)).collect();
             view.comments.clear_selection();
             if !new.is_empty() {
                 view.comments.selected = Some(new.remove(0));
@@ -180,7 +183,7 @@ impl PdfCraftApp {
                     view.comments.comment_added();
                 }
                 // Keep the pages the user acted on selected, where they now are.
-                select_after_edit(view, edit, info, self.quick_tool);
+                select_after_edit(view, edit, info, self.quick_tool, paste_before);
                 if std::mem::take(&mut view.comments.tool_done) && !self.comment_prefs.pinned {
                     self.quick_tool = crate::QuickTool::Select;
                 }

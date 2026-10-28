@@ -127,7 +127,7 @@ use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
 use state::OpenRequest;
 pub use state::{
-    CustomDraft, Dialog, DuplicateDraft, LeftPanel, LinkOrigin, Mode, NumberDraft, OpenOutcome, PageClip, PasswordPrompt, PendingLink,
+    CommentClip, CustomDraft, Dialog, DuplicateDraft, LeftPanel, LinkOrigin, Mode, NumberDraft, OpenOutcome, PageClip, PasswordPrompt, PendingLink,
     PendingRemoteLink, PropsTab, QuickTool, RecentFile, RightPanel, UnlockPrompt,
 };
 use state::{DocumentCopyJob, GridFile};

@@ -2800,15 +2800,8 @@ fn copied_comments_take_the_click_from_the_tool_that_is_on() {
     assert!(h.state().views[0].fill_text.is_some(), "Fill & Sign's Text tool opens its box again");
 }
 
-/// Copied comments paste into another document on its current page, each with its replies, as
-/// new comments (a second paste gives a second set); the copies are selected afterwards.
-#[test]
-fn copied_comments_paste_into_another_document() {
-    let mut h = harness(|app| {
-        app.open_bytes("other.pdf", None, TEXT_FIXTURE.to_vec()).expect("opens");
-        app.active = Some(0);
-    });
-    let (source, target) = (h.state().views[0].id, h.state().views[1].id);
+/// Two boxes on page 1 of the active document, and a reply to the first.
+fn add_two_boxes_and_a_reply(h: &mut Harness<'static, PdfCraftApp>) {
     for rect in [[20.0, 20.0, 60.0, 60.0], [100.0, 20.0, 140.0, 60.0]] {
         let shape = pdfcraft_engine::Shape::Rectangle { rect };
         let style = pdfcraft_engine::Style::default_for(&shape);
@@ -2822,6 +2815,18 @@ fn copied_comments_paste_into_another_document() {
     }
     assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::ReplyToAnnotation { page: 0, index: 0, text: "Reply".into(), author: "Tester".into() }));
     h.run_steps(2);
+}
+
+/// Copied comments paste into another document on its current page, each with its replies, as
+/// new comments (a second paste gives a second set); the copies are selected afterwards.
+#[test]
+fn copied_comments_paste_into_another_document() {
+    let mut h = harness(|app| {
+        app.open_bytes("other.pdf", None, TEXT_FIXTURE.to_vec()).expect("opens");
+        app.active = Some(0);
+    });
+    let (source, target) = (h.state().views[0].id, h.state().views[1].id);
+    add_two_boxes_and_a_reply(&mut h);
     // Adding a comment selects it; with nothing selected there is nothing to copy.
     h.state_mut().views[0].comments.clear_selection();
     assert!(!h.state_mut().execute("comment.copy"), "nothing selected: nothing to copy");

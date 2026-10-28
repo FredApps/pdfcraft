@@ -4,6 +4,7 @@ use pdfcraft_annot::{Markup, Meta, NewAnnotation, Shape, Style, TextReplacement,
 use pdfcraft_cos::{SaveOptions, write_full, write_incremental};
 use pdfcraft_forms::{NewField, add_field, fields, set_value};
 
+use super::xfdf::PDFCRAFT_NS;
 use super::*;
 
 /// Two blank pages with three fields (text, check box, list).
