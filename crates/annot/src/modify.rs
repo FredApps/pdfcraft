@@ -578,7 +578,7 @@ pub fn set_style(doc: &mut Document, page: usize, index: usize, change: StyleCha
 
 /// A FreeText's `/DA`: the text colour, the border's own colour when it has one (the stroking
 /// colour, `RG`), Helvetica at `size`.
-fn free_text_da(text: Rgb, border: Option<Rgb>, size: f64) -> PdfString {
+pub(crate) fn free_text_da(text: Rgb, border: Option<Rgb>, size: f64) -> PdfString {
     let [r, g, b] = text.map(|x| x.clamp(0.0, 1.0));
     let stroke = border.map(|c| c.map(|x| x.clamp(0.0, 1.0))).map(|[r, g, b]| format!("{} {} {} RG ", n(r), n(g), n(b))).unwrap_or_default();
     PdfString::literal(format!("{} {} {} rg {stroke}/Helv {} Tf", n(r), n(g), n(b), n(size)).into_bytes())

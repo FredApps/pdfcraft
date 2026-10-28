@@ -561,6 +561,9 @@ pub struct Style {
     pub width: f64,
     /// Interior fill for rectangles and ovals (`/IC`), background for text boxes.
     pub fill: Option<Rgb>,
+    /// A text box's, typewriter text's or callout's border colour where it differs from the
+    /// text's (`None`: the text colour), the stroking colour in its `/DA`.
+    pub border_color: Option<Rgb>,
 }
 
 /// The style properties changed by one annotation edit. `None` leaves a property unchanged.
@@ -588,9 +591,6 @@ pub struct TextReplacement<'a> {
     pub caret: &'a Style,
     pub strike_meta: &'a Meta,
     pub caret_meta: &'a Meta,
-    /// A text box's, typewriter text's or callout's border colour where it differs from the
-    /// text's (`None`: the text colour), the stroking colour in its `/DA`.
-    pub border_color: Option<Rgb>,
 }
 
 impl Default for Style {

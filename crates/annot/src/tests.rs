@@ -578,7 +578,7 @@ fn a_typewriter_border_goes_around_its_text_which_stays_put() {
     assert!(ap.contains("1 w\n") && ap.contains(" re S"), "a 1 pt border: {ap}");
     assert!(ap.contains(at), "{ap}");
     for (width, expected) in [(2.0, [99.0, 699.0, 201.0, 717.0]), (0.0, [101.0, 701.0, 199.0, 715.0])] {
-        set_style(&mut doc, 1, t, None, None, Some(width), None, &meta("")).unwrap();
+        set_style(&mut doc, 1, t, StyleChange::new(None, None, Some(width), None), &meta("")).unwrap();
         let d = &list(&doc, 1)[t];
         assert_eq!(rect(d), expected, "{width} pt border");
         let ap = ap_content(&doc, d);
@@ -587,7 +587,7 @@ fn a_typewriter_border_goes_around_its_text_which_stays_put() {
     }
     let shape = Shape::TextBox { rect: [100.0, 600.0, 200.0, 650.0], font_size: 11.0 };
     let b = add_annotation(&mut doc, &new(1, shape), &meta("b")).unwrap();
-    set_style(&mut doc, 1, b, None, None, Some(3.0), None, &meta("")).unwrap();
+    set_style(&mut doc, 1, b, StyleChange::new(None, None, Some(3.0), None), &meta("")).unwrap();
     assert_eq!(rect(&list(&doc, 1)[b]), [100.0, 600.0, 200.0, 650.0], "a text box keeps the box it was drawn with");
     // Another app's typed text with its width in /Border (no /BS): 4 pt, so 2 pt shrinks the box
     // by 2 on every side, as it is drawn.
@@ -604,7 +604,7 @@ fn a_typewriter_border_goes_around_its_text_which_stays_put() {
         d.set(b"Border".to_vec(), num_array(&[0.0, 0.0, 4.0]));
     })
     .unwrap();
-    set_style(&mut doc, 1, o, None, None, Some(2.0), None, &meta("")).unwrap();
+    set_style(&mut doc, 1, o, StyleChange::new(None, None, Some(2.0), None), &meta("")).unwrap();
     assert_eq!(rect(&list(&doc, 1)[o]), [102.0, 502.0, 198.0, 528.0], "the imported 4 pt border is read from /Border");
     // A border colour that isn't a colour is refused before anything is written.
     let mut bad = NewAnnotation { page: 1, style: Style::default_for(&shape), shape, contents: "x".into(), author: "Ada".into() };
@@ -628,7 +628,7 @@ fn a_text_border_can_have_its_own_colour() {
     assert!(ap.contains("1 0 0 RG\n1 w"), "the border in red: {ap}");
     assert!(ap.contains("0 0.5 0 rg"), "the text in green: {ap}");
     assert_eq!(props(&doc, 1, t).unwrap().border_color, Some([1.0, 0.0, 0.0]));
-    set_style(&mut doc, 1, t, Some([0.0, 0.0, 1.0]), None, None, None, &meta("")).unwrap();
+    set_style(&mut doc, 1, t, StyleChange::new(Some([0.0, 0.0, 1.0]), None, None, None), &meta("")).unwrap();
     assert_eq!(da(&doc), "0 0 1 rg 1 0 0 RG /Helv 11 Tf", "a new text colour keeps the border's");
     set_font_size(&mut doc, 1, t, 14.0, &meta("")).unwrap();
     assert_eq!(da(&doc), "0 0 1 rg 1 0 0 RG /Helv 14 Tf", "so does a new size");

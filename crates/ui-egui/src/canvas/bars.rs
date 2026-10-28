@@ -480,7 +480,7 @@ pub(super) fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         // A border around the text, in its colour; the text keeps its place.
                         let border_label = |w: f64| if w > 0.0 { format!("{w} pt") } else { tl!("None").to_string() };
                         let label = ui.label(tl!("Border:"));
-                        egui::ComboBox::from_id_salt("fill-text-border")
+                        craft_ui::ComboBox::from_id_salt("fill-text-border")
                             .selected_text(border_label(was.width))
                             .width(72.0)
                             .show_ui(ui, |ui| {
