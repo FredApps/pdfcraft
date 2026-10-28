@@ -213,7 +213,7 @@ impl ViewDefaults {
     }
 
     /// These defaults with the zoom a [`zoom_name`](Self::zoom_name) names, in any case. `None`
-    /// for anything else, including a percentage outside the 8–6400% the view can show.
+    /// for anything else, including a percentage outside the 1–6400% the view can show.
     pub fn with_zoom(self, name: &str) -> Option<Self> {
         let name = name.trim();
         let (fit, zoom) = if name.eq_ignore_ascii_case("fit-width") {
@@ -221,7 +221,7 @@ impl ViewDefaults {
         } else if name.eq_ignore_ascii_case("fit-page") {
             (Fit::Page, self.zoom)
         } else {
-            let percent = name.strip_suffix('%').unwrap_or(name).trim().parse::<f32>().ok().filter(|p| (8.0..=6400.0).contains(p))?;
+            let percent = name.strip_suffix('%').unwrap_or(name).trim().parse::<f32>().ok().filter(|p| (1.0..=6400.0).contains(p))?;
             (Fit::None, percent / 100.0)
         };
         Some(Self { fit, zoom, ..self })
