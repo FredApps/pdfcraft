@@ -405,12 +405,17 @@ fn wrap_styled_rows(
     chars: &[StyledChar],
     width: f64,
     measure: impl Fn(&[StyledChar]) -> Result<f64, EditError>,
-) -> Result<(StyledRows, RowRanges, Vec<bool>), EditError> {
+) -> Result<(StyledRows, RowRanges, Vec<bool>, Vec<usize>), EditError> {
     let mut rows: Vec<Vec<StyledChar>> = Vec::new();
     let mut row_ranges = Vec::new();
     // True when this row starts because the previous word did not fit, not because of a newline.
     let mut row_soft = Vec::new();
     let mut next_soft = false;
+    // How many separator characters a wrap trimmed off the row that just ended, for the row
+    // about to start (0 for a Chinese/Japanese word split, which trims none; meaningless unless
+    // the row it belongs to is soft). Mirrors `next_soft`.
+    let mut row_gap = Vec::new();
+    let mut next_gap = 0usize;
     let mut row_start = 0;
     let mut row = Vec::new();
     let mut row_width = 0.0;
@@ -424,6 +429,8 @@ fn wrap_styled_rows(
         if item.0 == '\n' {
             row_soft.push(next_soft);
             next_soft = false;
+            row_gap.push(next_gap);
+            next_gap = 0;
             row_ranges.push(row_start..row_start + row.len());
             rows.push(std::mem::take(&mut row));
             row_width = 0.0;
@@ -444,11 +451,15 @@ fn wrap_styled_rows(
         let word = chars.get(at..end).unwrap_or_default();
         let word_width = measure(word)?;
         if !row.is_empty() && !item.0.is_whitespace() && row_width + word_width > width + 0.5 {
+            let mut trimmed = 0usize;
             while row.last().is_some_and(|c: &StyledChar| c.0.is_whitespace()) {
                 row.pop();
+                trimmed += 1;
             }
             row_soft.push(next_soft);
             next_soft = true;
+            row_gap.push(next_gap);
+            next_gap = trimmed;
             row_ranges.push(row_start..row_start + row.len());
             rows.push(std::mem::take(&mut row));
             row_width = 0.0;
@@ -460,10 +471,11 @@ fn wrap_styled_rows(
     }
     if !row.is_empty() {
         row_soft.push(next_soft);
+        row_gap.push(next_gap);
         row_ranges.push(row_start..row_start + row.len());
         rows.push(row);
     }
-    Ok((rows, row_ranges, row_soft))
+    Ok((rows, row_ranges, row_soft, row_gap))
 }
 
 fn apply_range_styles<'a>(
@@ -745,6 +757,78 @@ fn rewrite_anchor<'a>(
     RewriteAnchor { lead, drop, start, split }
 }
 
+/// Open (`op` is `"BMC"`) or close (`"EMC"`) the `/P` marker that wraps the whole rewrite when
+/// `marked` (every row is in this rewrite, see [`rewrite_styled_block`]), so the paragraph
+/// cannot be mistaken for a neighbour by geometry alone (#2517).
+fn push_whole_paragraph_marker(block_ops: &mut Vec<Op>, marked: bool, op: &str) {
+    if !marked {
+        return;
+    }
+    let operands = if op == "BMC" { vec![Object::name("P")] } else { Vec::new() };
+    block_ops.push(Op::new(op, operands));
+}
+
+/// An empty marker between two rows of one rewrite. `/PCHard` is a newline that was already in
+/// the text. `/PCSoft` is a wrap and rejoins when the box widens, with `/N` the exact number of
+/// separator characters it consumed (0 for a Chinese/Japanese word split), so a rejoin restores
+/// what was actually there instead of guessing a single space (#2529). Neither is a paragraph
+/// region, so the lines stay in one scope.
+fn push_row_break_marker(block_ops: &mut Vec<Op>, row_soft: &[bool], row_gap: &[usize], row_index: usize) {
+    if row_soft.get(row_index).copied().unwrap_or(false) {
+        let mut properties = Dict::new();
+        let gap = row_gap.get(row_index).copied().unwrap_or(1);
+        properties.set(b"N".to_vec(), Object::Int(i64::try_from(gap).unwrap_or(i64::MAX)));
+        block_ops.push(Op::new("BDC", vec![Object::name("PCSoft"), Object::Dict(properties)]));
+    } else {
+        block_ops.push(Op::new("BMC", vec![Object::name("PCHard")]));
+    }
+    block_ops.push(Op::new("EMC", vec![]));
+}
+
+/// [`splice`] with the rewritten rows spliced in at `at`, and (when `marker` names one) a `/P`
+/// marker opened at its start and closed at its `next` line or, when nothing follows, after the
+/// paragraph's own last `ET` (appended past the stream's last operator when that close is at or
+/// beyond `ops.len()`, since `splice`'s callback never visits that index).
+fn splice_with_marker(
+    pieces: &Pieces,
+    ops: &[Op],
+    marker: Option<(usize, Option<usize>, usize)>,
+    at: usize,
+    mut block_ops: Vec<Op>,
+    drop: &std::collections::HashSet<usize>,
+) -> Vec<Vec<u8>> {
+    let data = splice(pieces, ops, |i| {
+        let mut insert = Vec::new();
+        if let Some((start_at, next, close)) = marker {
+            if i == start_at {
+                insert.push(Op::new("BMC", vec![Object::name("P")]));
+            }
+            if next.is_none() && i == close {
+                insert.push(Op::new("EMC", vec![]));
+            }
+            if next == Some(i) {
+                insert.push(Op::new("EMC", vec![]));
+            }
+        }
+        if i == at {
+            insert.append(&mut block_ops);
+        }
+        (insert, !drop.contains(&i))
+    });
+    if !marker.is_some_and(|(_, next, close)| next.is_none() && close >= ops.len()) {
+        return data;
+    }
+    let mut data = data;
+    if let Some(last) = data.last_mut() {
+        if last.last().is_some_and(|byte| !byte.is_ascii_whitespace()) {
+            last.push(b'\n');
+        }
+        // `splice` never visits `ops.len()`, so a close after the final operator is appended.
+        last.extend_from_slice(&pdfcraft_content::serialize_ops(&[Op::new("EMC", vec![])]));
+    }
+    data
+}
+
 /// Rewrite visual rows while keeping the source style on each surviving character. Resource
 /// names may differ between Unicode subsets of the same face; encoding searches those subsets.
 pub(crate) fn rewrite_styled_block(
@@ -856,7 +940,7 @@ pub(crate) fn rewrite_styled_block(
         }
         Ok(width)
     };
-    let (rows, row_ranges, row_soft) = wrap_styled_rows(&chars, width, measure)?;
+    let (rows, row_ranges, row_soft, row_gap) = wrap_styled_rows(&chars, width, measure)?;
     let streams = content_streams(doc, &p.dict)?;
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
@@ -895,9 +979,7 @@ pub(crate) fn rewrite_styled_block(
     // scope so the neighbour stays out (#2517). A row left in the source stream cannot share
     // that marker, so it is omitted and geometry groups those rows as before.
     let marked = kept.iter().all(|row| !*row);
-    if marked {
-        block_ops.push(Op::new("BMC", vec![Object::name("P")]));
-    }
+    push_whole_paragraph_marker(&mut block_ops, marked, "BMC");
     let crop = p.crop(doc);
     let centered = is_centred(block, lines, (crop[0] + crop[2]) / 2.0, first.size);
     let source_leading = block
@@ -926,12 +1008,7 @@ pub(crate) fn rewrite_styled_block(
             continue;
         }
         if !row.is_empty() && row_index > 0 {
-            // An empty marker between lines. `/PCSoft` is a wrap and rejoins when the box
-            // widens. `/PCHard` is a newline that was already in the text. Neither is a
-            // paragraph region, so the lines stay in one scope.
-            let name = if row_soft.get(row_index).copied().unwrap_or(false) { "PCSoft" } else { "PCHard" };
-            block_ops.push(Op::new("BMC", vec![Object::name(name)]));
-            block_ops.push(Op::new("EMC", vec![]));
+            push_row_break_marker(&mut block_ops, &row_soft, &row_gap, row_index);
         }
         let w = measured.get(row_index).copied().unwrap_or(0.0);
         let align = style.align.unwrap_or(if centered { crate::added::Align::Center } else { crate::added::Align::Left });
@@ -1076,9 +1153,7 @@ pub(crate) fn rewrite_styled_block(
             style.line_spacing.unwrap_or(1.5).clamp(0.5, 5.0) * style.size.unwrap_or(anchor.size)
         };
     }
-    if marked {
-        block_ops.push(Op::new("EMC", vec![]));
-    }
+    push_whole_paragraph_marker(&mut block_ops, marked, "EMC");
     block_ops.push(Op::new("Q", vec![]));
     block_ops.extend(after.ops());
     if split {
@@ -1091,37 +1166,7 @@ pub(crate) fn rewrite_styled_block(
     // safe. The close is not part of `block_ops`: that vector can end inside a text object
     // when the rewrite splits one, and a kept row's operators come later in the stream.
     let marker = if marked { None } else { paragraph_marker(block, lines, &ops) };
-    let data = splice(&pieces, &ops, |i| {
-        let mut insert = Vec::new();
-        if let Some((start_at, next, close)) = marker {
-            if i == start_at {
-                insert.push(Op::new("BMC", vec![Object::name("P")]));
-            }
-            if next.is_none() && i == close {
-                insert.push(Op::new("EMC", vec![]));
-            }
-            if next == Some(i) {
-                insert.push(Op::new("EMC", vec![]));
-            }
-        }
-        if i == at {
-            insert.append(&mut block_ops);
-        }
-        (insert, !drop.contains(&i))
-    });
-    let data = if marker.is_some_and(|(_, next, close)| next.is_none() && close >= ops.len()) {
-        let mut data = data;
-        if let Some(last) = data.last_mut() {
-            if last.last().is_some_and(|byte| !byte.is_ascii_whitespace()) {
-                last.push(b'\n');
-            }
-            // `splice` never visits `ops.len()`, so a close after the final operator is appended.
-            last.extend_from_slice(&pdfcraft_content::serialize_ops(&[Op::new("EMC", vec![])]));
-        }
-        data
-    } else {
-        data
-    };
+    let data = splice_with_marker(&pieces, &ops, marker, at, block_ops, &drop);
     let contents = rewritten_contents(doc, &streams, data);
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     doc.update_dict(p.obj, |d| {

@@ -365,14 +365,17 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
     let mut out = String::new();
     for (index, part) in parts.iter().enumerate() {
         if index > 0 {
-            if break_is_soft(block, lines, index) {
-                if out.ends_with('-') {
+            match break_gap(block, lines, index) {
+                Some(_) if out.ends_with('-') => {
                     out.pop();
-                } else if !out.ends_with(char::is_whitespace) {
-                    out.push(' ');
                 }
-            } else {
-                out.push('\n');
+                // `gap` is the exact number of separator characters the wrap consumed (0 for a
+                // Chinese/Japanese word split, which has no space of its own) when the marker or
+                // the source recorded it; a line already ending in whitespace is left alone so a
+                // row whose own text kept a trailing space isn't doubled.
+                Some(gap) if !out.ends_with(char::is_whitespace) => out.push_str(&" ".repeat(gap)),
+                Some(_) => {}
+                None => out.push('\n'),
             }
         }
         out.push_str(part);
@@ -380,20 +383,24 @@ fn reflow_text(block: &TextBlock, lines: &[TextLine]) -> String {
     out
 }
 
-fn break_is_soft(block: &TextBlock, lines: &[TextLine], row_index: usize) -> bool {
-    let Some(line) = block.rows.get(row_index).and_then(|row| row.first()).and_then(|i| lines.get(*i)) else { return false };
+/// `None`: a hard break, kept as a newline. `Some(gap)`: a soft wrap, rejoined with exactly `gap`
+/// spaces — the count a `/PCSoft` marker recorded ([`TextLine::soft_gap`]), or, for a line this
+/// app did not mark (a file written elsewhere, or an older save), a single space when the
+/// geometry looks like an ordinary wrapped body line (`#2529`).
+fn break_gap(block: &TextBlock, lines: &[TextLine], row_index: usize) -> Option<usize> {
+    let line = block.rows.get(row_index).and_then(|row| row.first()).and_then(|i| lines.get(*i))?;
     if line.hard_break {
-        return false;
+        return None;
     }
     if line.soft_break {
-        return true;
+        return Some(line.soft_gap);
     }
-    let Some(prev) = block.rows.get(row_index.wrapping_sub(1)).and_then(|row| row_rect(row, lines)) else { return false };
-    let Some(next) = block.rows.get(row_index).and_then(|row| row_rect(row, lines)) else { return false };
+    let prev = block.rows.get(row_index.wrapping_sub(1)).and_then(|row| row_rect(row, lines))?;
+    let next = block.rows.get(row_index).and_then(|row| row_rect(row, lines))?;
     let size = line.size.max(1.0);
     let slack = block.rect[2] - prev[2];
     let width = prev[2] - prev[0];
     // Short rows define the right edge by their own letters. A body line that fills the
     // measure leaves almost no room for the next word.
-    slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack
+    (slack <= size * 0.75 && width >= size * 8.0 && (next[2] - next[0]) + size * 0.25 > slack).then_some(1)
 }

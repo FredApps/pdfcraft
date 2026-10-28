@@ -304,6 +304,11 @@ pub(super) struct Shown {
     /// Set when a `/PCSoft` or `/PCHard` marker was seen since the previous text line.
     pub(super) soft_break: bool,
     pub(super) hard_break: bool,
+    /// The `/N` a `/PCSoft` marker carried: how many separator characters the wrap consumed (0
+    /// for a Chinese/Japanese word split). Meaningless unless `soft_break` is set; 1 for a
+    /// `/PCSoft` with no `/N` (a file saved before this was tracked, or by another writer),
+    /// matching the single space a rejoin always used before #2529.
+    pub(super) soft_gap: usize,
 }
 
 impl Shown {
@@ -551,6 +556,7 @@ struct TextRunState<'a> {
     out: &'a mut Vec<Shown>,
     soft_break: bool,
     hard_break: bool,
+    soft_gap: usize,
 }
 
 fn show_text(op: &Op, i: usize, state: &mut TextRunState<'_>) -> Result<(), EditError> {
@@ -749,6 +755,7 @@ fn show_text(op: &Op, i: usize, state: &mut TextRunState<'_>) -> Result<(), Edit
         actual_text: false,
         soft_break: state.soft_break,
         hard_break: state.hard_break,
+        soft_gap: state.soft_gap,
     });
     Ok(())
 }
@@ -777,6 +784,10 @@ pub(super) fn interpret(
     // before the next line. Neither name is a paragraph region, so it does not change scope.
     let mut soft_break = false;
     let mut hard_break = false;
+    // `/PCSoft`'s `/N` property: how many separator characters the wrap consumed. A `/PCSoft`
+    // with no properties dict (a file saved before this was tracked, or by another writer) reads
+    // as 1, the single space a rejoin always used before #2529.
+    let mut soft_gap = 1usize;
     for (i, op) in ops.iter().enumerate() {
         match op.op.as_slice() {
             // No depth cap: every `EMC` pops, so a capped push would pair it with the enclosing
@@ -785,6 +796,14 @@ pub(super) fn interpret(
                 if op.name(0) == Some(b"PCSoft") {
                     soft_break = true;
                     hard_break = false;
+                    soft_gap = op
+                        .operands
+                        .get(1)
+                        .and_then(Object::as_dict)
+                        .and_then(|d| d.get(b"N"))
+                        .and_then(Object::as_int)
+                        .and_then(|n| usize::try_from(n).ok())
+                        .unwrap_or(1);
                 } else if op.name(0) == Some(b"PCHard") {
                     hard_break = true;
                     soft_break = false;
@@ -905,6 +924,7 @@ pub(super) fn interpret(
                     out: &mut out,
                     soft_break,
                     hard_break,
+                    soft_gap,
                 };
                 show_text(op, i, &mut state)?;
                 // A numeric-only TJ adjustment shows no glyphs and pushes nothing: the break
@@ -912,6 +932,7 @@ pub(super) fn interpret(
                 if out.len() > before {
                     soft_break = false;
                     hard_break = false;
+                    soft_gap = 1;
                 }
             }
             _ => {}

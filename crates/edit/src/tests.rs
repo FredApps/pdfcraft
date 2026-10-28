@@ -3247,6 +3247,59 @@ fn a_wrapped_line_rejoins_when_widened_and_a_typed_break_stays() {
     assert_eq!(text::text_blocks(&typed, 0).unwrap()[0].editor_text, "One\nTwo\nThree\nfour");
 }
 
+/// #2529 (reviewer): a run of typed spaces that happens to fall at a wrap point is not the same
+/// as the single space an ordinary word gap leaves. Narrowing drops the whole gap, as any wrap
+/// does (#4199's own test: `wrapped("aa  bb  cc", 6.0) == ["aa  bb", "cc"]`); widening it back
+/// must not quietly turn two typed spaces into one.
+#[test]
+fn narrowing_then_widening_keeps_a_typed_double_space() {
+    let mut doc = text_page("BT /F1 24 Tf 20 150 Td (One  Two) Tj ET");
+    let wide = text::text_blocks(&doc, 0).unwrap().into_iter().next().unwrap().rect;
+    let wide_width = wide[2] - wide[0];
+    text::rewrite_block(&mut doc, 0, 0, None, &text::BlockStyle { width: Some(45.0), ..Default::default() }).unwrap();
+    let block = text::text_blocks(&doc, 0).unwrap().into_iter().next().unwrap();
+    assert_eq!(block.editor_text, "One\nTwo", "the narrow box did not wrap between the two typed spaces: {}", block.editor_text);
+    text::rewrite_block(&mut doc, 0, 0, Some(&block.reflow_text), &text::BlockStyle { width: Some(wide_width), ..Default::default() }).unwrap();
+    let rewidened = text::text_blocks(&doc, 0).unwrap().into_iter().next().unwrap();
+    assert_eq!(rewidened.editor_text, "One  Two", "the second typed space was lost: {:?}", rewidened.editor_text);
+}
+
+/// #2529: a Chinese/Japanese word split has no space of its own (`wrap`'s own doc comment: "those
+/// pieces join without a space"). Narrowing a paragraph until it wraps inside such a word, then
+/// widening it back, must restore the two pieces exactly as they were, not insert a space between
+/// them. Checked on both the single-style rewrite path and the row-editor (mixed-style) path.
+#[test]
+fn narrowing_then_widening_a_japanese_word_adds_no_space() {
+    if pdfcraft_fonts::document_japanese_font().is_none() {
+        eprintln!("skipping narrowing_then_widening_a_japanese_word_adds_no_space: built without craft-fonts (set CRAFT_FONTS_DIR)");
+        return;
+    }
+    let text = "日本語の文章です";
+    for draft in [text.to_string(), format!("見出し\n{text}")] {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Placeholder text) Tj ET");
+        text::rewrite_block(&mut doc, 0, 0, Some(&draft), &text::BlockStyle { width: Some(400.0), ..Default::default() }).unwrap();
+        let wide = text::text_blocks(&reopen(&doc), 0).unwrap().into_iter().next().unwrap();
+        let wide_width = wide.rect[2] - wide.rect[0];
+
+        // Narrow enough to force a wrap inside the Japanese word, not just between the two rows.
+        // A width-only change must pass `reflow_text` explicitly, as the editor UI does: `None`
+        // falls back to the paragraph's space-joined display text and would not keep a typed break.
+        text::rewrite_block(&mut doc, 0, 0, Some(&wide.reflow_text), &text::BlockStyle { width: Some(60.0), ..Default::default() }).unwrap();
+        let narrow = text::text_blocks(&reopen(&doc), 0).unwrap().into_iter().next().unwrap();
+        assert!(narrow.rows.len() > draft.matches('\n').count() + 1, "the narrow box did not wrap: {:?}", narrow.editor_text);
+        assert_eq!(
+            narrow.editor_text.replace('\n', ""),
+            draft.replace('\n', ""),
+            "wrapping must not add or drop characters: {:?}",
+            narrow.editor_text
+        );
+
+        text::rewrite_block(&mut doc, 0, 0, Some(&narrow.reflow_text), &text::BlockStyle { width: Some(wide_width), ..Default::default() }).unwrap();
+        let rewidened = text::text_blocks(&reopen(&doc), 0).unwrap().into_iter().next().unwrap();
+        assert_eq!(rewidened.editor_text, draft, "a Japanese word split gained a space it never had: {:?}", rewidened.editor_text);
+    }
+}
+
 /// A file that did not mark its breaks still rejoins a line that fills the measure, and keeps a
 /// short line that had room.
 #[test]
