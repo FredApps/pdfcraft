@@ -1,5 +1,5 @@
 use super::create::normalize;
-use super::{ObjRef, appearance};
+use super::{Dict, ObjRef, appearance};
 
 pub type Rgb = [f64; 3];
 
@@ -564,6 +564,8 @@ pub struct Style {
     /// A text box's, typewriter text's or callout's border colour where it differs from the
     /// text's (`None`: the text colour), the stroking colour in its `/DA`.
     pub border_color: Option<Rgb>,
+    /// A text box's or typewriter text's border shape (a callout's is always a rectangle).
+    pub border_shape: BorderShape,
 }
 
 /// The style properties changed by one annotation edit. `None` leaves a property unchanged.
@@ -591,8 +593,6 @@ pub struct TextReplacement<'a> {
     pub caret: &'a Style,
     pub strike_meta: &'a Meta,
     pub caret_meta: &'a Meta,
-    /// A text box's or typewriter text's border shape (a callout's is always a rectangle).
-    pub border_shape: BorderShape,
 }
 
 impl Default for Style {
@@ -668,7 +668,7 @@ impl BorderShape {
     /// The text box inside `outer` for this shape when none is recorded: the inverse of
     /// [`Self::around`] for an oval, a box through a circle's corners for a circle, keeping the
     /// proportions of `was` (the one it had).
-    fn inside(self, outer: [f64; 4], width: f64, was: [f64; 4]) -> [f64; 4] {
+    pub(crate) fn inside(self, outer: [f64; 4], width: f64, was: [f64; 4]) -> [f64; 4] {
         let o = normalize(outer);
         let (cx, cy, hx, hy) = ((o[0] + o[2]) / 2.0, (o[1] + o[3]) / 2.0, (o[2] - o[0]) / 2.0, (o[3] - o[1]) / 2.0);
         let gap = width.max(0.0) + 1.0;

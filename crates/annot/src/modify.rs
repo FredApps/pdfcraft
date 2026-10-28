@@ -5,8 +5,8 @@ use super::draw::{draw_appearance, redraw_or_restore, set_appearance};
 use super::info::{line_endings_of, text_value};
 use super::lookup::{annot_dict, annot_ref, annotation_flags, annots, page_ref, set_annots};
 use super::types::{
-    FLAG_HIDDEN, FLAG_LOCKED, FLAG_NO_ROTATE, FLAG_NO_ZOOM, FLAG_PRINT, LineEnding, Markup, Meta, NewAnnotation, ReviewState, Rgb, Shape, Style,
-    StyleChange, TextReplacement,
+    BorderShape, FLAG_HIDDEN, FLAG_LOCKED, FLAG_NO_ROTATE, FLAG_NO_ZOOM, FLAG_PRINT, LineEnding, Markup, Meta, NewAnnotation, ReviewState, Rgb,
+    Shape, Style, StyleChange, TextReplacement,
 };
 use super::{AnnotError, Dict, Document, HashMap, HashSet, ObjRef, Object, PdfString, appearance};
 
@@ -388,7 +388,7 @@ pub fn set_rect(doc: &mut Document, page: usize, index: usize, rect: [f64; 4], m
 
 /// A FreeText's text box: `/Rect` inset by `/RD` for a callout or a text box inside an oval or a
 /// circle, else `/Rect`. `None` when they can't be read.
-fn text_box_of(d: &Dict) -> Option<[f64; 4]> {
+pub(crate) fn text_box_of(d: &Dict) -> Option<[f64; 4]> {
     let nums = |key: &[u8]| -> Option<Vec<f64>> { d.get(key)?.as_array()?.iter().map(|o| o.as_f64()).collect() };
     let rect = normalize(four(&nums(b"Rect")?)?);
     if !d.contains(b"CL") && BorderShape::of(d) == BorderShape::Rectangle {
@@ -402,7 +402,7 @@ fn text_box_of(d: &Dict) -> Option<[f64; 4]> {
 /// Give text box or typewriter text `d`, whose text box is `tb`, the border `shape` (`width`
 /// wide): `/Rect` around it, `/RD` and `/PCBorderShape`, or for a rectangle `/Rect` the text
 /// box itself again.
-fn shape_text_box(d: &mut Dict, tb: [f64; 4], shape: BorderShape, width: f64) {
+pub(crate) fn shape_text_box(d: &mut Dict, tb: [f64; 4], shape: BorderShape, width: f64) {
     // A circle goes around the text as the box lays it out.
     let text = (shape == BorderShape::Circle).then(|| text_extent(d, displayed_sides(d, tb).0 - 2.0 * (2.0 + width.max(0.0))));
     let outer = shape.around(tb, width, text);

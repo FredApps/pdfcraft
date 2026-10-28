@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use pdfcraft_cos::{Document, ObjRef, Object, SaveOptions, write_incremental};
 
+use super::modify::text_box_of;
 use super::*;
 
 /// Two pages. Page 1 has an inline Square annotation in a direct /Annots array; page 2 has an
@@ -371,7 +372,7 @@ fn text_boxes_take_an_oval_or_a_circle_around_their_text() {
     assert_eq!(text_at(&doc, d).as_deref(), Some(centred.as_str()));
     // A thicker border: the typed text's box grows by the change on every side, so its text keeps
     // its place inside the thicker line (as with a rectangle), and the circle goes around that.
-    set_style(&mut doc, 0, t, None, None, Some(3.0), None, &meta("")).unwrap();
+    set_style(&mut doc, 0, t, StyleChange::new(None, None, Some(3.0), None), &meta("")).unwrap();
     let d = &list(&doc, 0)[t];
     assert_eq!(text_at(&doc, d).as_deref(), Some(centred.as_str()));
     let r3 = (hw + 7.0).max(hw.hypot(6.0) + 4.0);
@@ -485,7 +486,7 @@ fn a_circle_touching_its_text_box_keeps_following_its_text() {
     let t = add_annotation(&mut doc, &b, &meta("t")).unwrap();
     // Circle, then a 1 pt border, which the circle grows by.
     set_border_shape(&mut doc, 0, t, BorderShape::Circle, &meta("")).unwrap();
-    set_style(&mut doc, 0, t, None, None, Some(1.0), None, &meta("")).unwrap();
+    set_style(&mut doc, 0, t, StyleChange::new(None, None, Some(1.0), None), &meta("")).unwrap();
     let lines = |doc: &Document| ap_content(doc, &list(doc, 0)[t]).matches(" Tj").count();
     let frame = |doc: &Document| {
         let r = rect(&list(doc, 0)[t]);

@@ -34,7 +34,7 @@ use geometry::handle_pos;
 #[cfg(test)]
 pub(crate) use geometry::{caret_snap, snapped_caret};
 pub(crate) use geometry::{corner_ratio, page_rotation, resized};
-pub use geometry::{drawn_text_box_rect, text_box_rect};
+pub use geometry::{drawn_text_box_rect, snug_text_box_rect, text_box_rect};
 pub(crate) use input::{fill_grabs, keys, nudge_keys, page_after_text, page_input, select_grabs};
 pub use menu::{CanvasAction, fill_picker, recent_custom_colours, remember_custom_colour, status_badge, swatch_grid};
 #[cfg(test)]

@@ -260,7 +260,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
                     // Text boxes and typewriter text: an oval or a circle goes around the text.
                     if let Some(shape) = e.border_shape.as_mut() {
                         let label = ui.label(tl!("Border shape"));
-                        egui::ComboBox::from_id_salt("border-shape")
+                        craft_ui::ComboBox::from_id_salt("border-shape")
                             .selected_text(tl!(shape.name()))
                             .show_ui(ui, |ui| {
                                 for s in pdfcraft_engine::BorderShape::ALL {
