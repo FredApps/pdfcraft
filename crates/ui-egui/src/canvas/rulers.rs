@@ -124,7 +124,6 @@ struct RulerAxes {
     horizontal_origin: f64,
     horizontal_start: f64,
     horizontal_length: f64,
-    rendered_width: f64,
     vertical_origin: f64,
     vertical_length: f64,
     scale_x: f64,
@@ -209,8 +208,8 @@ fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
         };
         gap(a).total_cmp(&gap(b))
     });
-    let (horizontal_origin, horizontal_start, horizontal_length, rendered_width, rendered_page_width) =
-        partner.map_or((page.page_rect.left(), 0.0, page_width_points, page.page_rect.width(), page.page_rect.width()), |other| {
+    let (horizontal_origin, horizontal_start, horizontal_length, rendered_page_width) =
+        partner.map_or((page.page_rect.left(), 0.0, page_width_points, page.page_rect.width()), |other| {
             let other_rotated = !other.rotation_degrees.is_multiple_of(180);
             let other_width_points = if other_rotated { other.unrotated_size_points.y } else { other.unrotated_size_points.x };
             let rendered_page_width = page.page_rect.width() + other.page_rect.width();
@@ -219,7 +218,6 @@ fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
                     (other.page_rect.right() + page.page_rect.left()) / 2.0,
                     -other_width_points,
                     other_width_points + page_width_points,
-                    page.page_rect.right() - other.page_rect.left(),
                     rendered_page_width,
                 )
             } else {
@@ -227,13 +225,11 @@ fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
                     (page.page_rect.right() + other.page_rect.left()) / 2.0,
                     -page_width_points,
                     page_width_points + other_width_points,
-                    other.page_rect.right() - page.page_rect.left(),
                     rendered_page_width,
                 )
             }
         });
     let horizontal_length = f64::from(horizontal_length);
-    let rendered_width = f64::from(rendered_width);
     let rendered_page_width = f64::from(rendered_page_width);
     // The facing-page gutter has no PDF-point extent and must not change ruler scale. Pages are
     // snapped independently, so derive one aggregate scale from only their final rendered widths.
@@ -246,7 +242,6 @@ fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
         horizontal_origin: f64::from(horizontal_origin),
         horizontal_start: f64::from(horizontal_start),
         horizontal_length,
-        rendered_width,
         vertical_origin: f64::from(page.page_rect.top()),
         vertical_length: f64::from(page_height_points),
         scale_x,
@@ -300,17 +295,18 @@ mod tests {
 
         let axes_for_gap = |gap: f32| {
             let right = page(1, Rect::from_min_size(pos2(399.0 + gap, 100.0), vec2(201.0, 400.0)), 0, vec2(400.0, 800.0));
+            let rendered_width = f64::from(right.page_rect.right() - left.page_rect.left());
             let geometry = CanvasGeometry { viewport_rect: viewport, pages: vec![left, right], active_page_index: Some(0) };
-            ruler_axes(&geometry).expect("facing-page axes")
+            (ruler_axes(&geometry).expect("facing-page axes"), rendered_width)
         };
-        let axes = axes_for_gap(2.0);
-        let wider_gap_axes = axes_for_gap(12.0);
+        let (axes, rendered_width) = axes_for_gap(2.0);
+        let (wider_gap_axes, wider_gap_rendered_width) = axes_for_gap(12.0);
 
         assert_eq!(axes.horizontal_length, 1_000.0);
-        assert_eq!(axes.rendered_width, 502.0);
+        assert_eq!(rendered_width, 502.0);
         assert!((axes.scale_x - 0.5).abs() < f64::EPSILON);
         assert!((wider_gap_axes.scale_x - axes.scale_x).abs() < f64::EPSILON);
-        assert_eq!(wider_gap_axes.rendered_width, 512.0);
+        assert_eq!(wider_gap_rendered_width, 512.0);
 
         // The gap is screen chrome, not document width. Increasing only the gap
         // must not switch the horizontal ruler into page-relative mode.
@@ -318,7 +314,7 @@ mod tests {
         let relative_threshold = ruler_width * 0.72;
         assert!(axes.horizontal_length * axes.scale_x < relative_threshold);
         assert!(wider_gap_axes.horizontal_length * wider_gap_axes.scale_x < relative_threshold);
-        assert!(wider_gap_axes.rendered_width >= relative_threshold);
+        assert!(wider_gap_rendered_width >= relative_threshold);
         let left_edge = axes.horizontal_origin + axes.horizontal_start * axes.scale_x;
         let right_edge = left_edge + axes.horizontal_length * axes.scale_x;
         assert!((left_edge - 100.0).abs() < 1e-9);
