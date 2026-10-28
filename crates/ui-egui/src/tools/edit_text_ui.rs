@@ -476,7 +476,7 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, lines: &[pdfcraft_engine::Text
 }
 
 /// The inline editor; returns the edit once the text is applied.
-pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -> Option<Edit> {
+pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, interaction_rect: Rect) -> Option<Edit> {
     // Clicks outside the document (the Format text panel) keep the paragraph open. Where the
     // click landed is `interact_pos`: `latest_pos` is gone on the frame a tap lifts.
     let outside = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !view.viewport_rect().contains(p));
@@ -500,7 +500,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     // page's edge (a converter relying on the page clip) must not cover the next page or the
     // tool bars (#3061).
     let viewport = view.viewport_rect();
-    let page_clip = xf.rect.intersect(viewport);
+    let page_clip = xf.rect.intersect(viewport).intersect(interaction_rect);
     let ed = view.line_editor.as_mut()?;
     if hold {
         ed.focus = true;

@@ -104,6 +104,15 @@ pub(super) fn blocked_rects(enabled: bool, presentation: bool, organize: bool, v
     vec![layout.corner, layout.horizontal, layout.vertical]
 }
 
+/// The part of `viewport` left for page interaction after its top and left ruler bands.
+pub(super) fn page_interaction_rect(enabled: bool, presentation: bool, organize: bool, viewport: Rect) -> Rect {
+    if !enabled || presentation || organize || !viewport.is_positive() {
+        return viewport;
+    }
+    let layout = RulerLayout::new(viewport);
+    Rect::from_min_max(layout.corner.max, viewport.max)
+}
+
 pub(super) fn paint(app: &PdfCraftApp, index: usize, ui: &egui::Ui) {
     let Some(view) = app.views.get(index) else { return };
     if !app.show_rulers || view.presentation.is_some() || view.organize {
@@ -341,5 +350,16 @@ mod tests {
         assert!(blocked_rects(true, true, false, viewport).is_empty());
         assert!(blocked_rects(true, false, true, viewport).is_empty());
         assert!(blocked_rects(true, false, false, Rect::NOTHING).is_empty());
+    }
+
+    #[test]
+    fn page_interaction_rect_excludes_ruler_bands_only_when_eligible() {
+        let viewport = Rect::from_min_size(pos2(10.0, 20.0), vec2(800.0, 600.0));
+        let layout = RulerLayout::new(viewport);
+        assert_eq!(page_interaction_rect(true, false, false, viewport), Rect::from_min_max(layout.corner.max, viewport.max));
+        assert_eq!(page_interaction_rect(false, false, false, viewport), viewport);
+        assert_eq!(page_interaction_rect(true, true, false, viewport), viewport);
+        assert_eq!(page_interaction_rect(true, false, true, viewport), viewport);
+        assert_eq!(page_interaction_rect(true, false, false, Rect::NOTHING), Rect::NOTHING);
     }
 }

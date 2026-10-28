@@ -2525,7 +2525,14 @@ fn track_scroll<T>(ui: &egui::Ui, view: &mut DocView, out: &egui::containers::sc
 
 /// The hover tip, find bar, size hint and the in-place editors drawn over the pages. Whether the
 /// text editor was finished.
-fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, primary_down: bool, hover_text: Option<(Pos2, String)>) -> bool {
+fn frame_overlays(
+    ui: &mut egui::Ui,
+    view: &mut DocView,
+    env: &PageEnv<'_>,
+    primary_down: bool,
+    hover_text: Option<(Pos2, String)>,
+    rulers_enabled: bool,
+) -> bool {
     let PageEnv { added, author, avail, can_modify, doc, form, info, prefs, t, today, tool, units, unobstructed, .. } = *env;
     if let Some((pos, text)) = hover_text {
         // Click-through, as a tooltip is: the pages lose the pointer under anything that isn't.
@@ -2545,7 +2552,8 @@ fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, prim
     if let Some(e) = comments::composer(ui.ctx(), view, info, prefs) {
         view.pending_edit = Some(e);
     }
-    if let Some(e) = crate::edit_text_ui::overlay(ui.ctx(), view, info) {
+    let editor_interaction = rulers::page_interaction_rect(rulers_enabled, view.presentation.is_some(), view.organize, view.viewport_rect());
+    if let Some(e) = crate::edit_text_ui::overlay(ui.ctx(), view, info, editor_interaction) {
         view.pending_edit = Some(e);
     }
     let text_box = crate::forms_ui::text_box(doc, view, form);
@@ -3087,7 +3095,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let pan_held = track_scroll(ui, view, &out, glide);
     plan_renders(ui, view, info, out.inner, &RenderPlan { visible_pages: &visible_pages, tag, scale, sharp_held, pan_held, hand });
 
-    let text_done = frame_overlays(ui, view, &env, primary_down, hover_text);
+    let text_done = frame_overlays(ui, view, &env, primary_down, hover_text, rulers_enabled);
     if let Some(why) = view.objects.notice.take() {
         refused = Some(why);
     }
