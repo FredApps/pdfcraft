@@ -188,6 +188,8 @@ fn snap_ruler_coordinate(value: f64, pixels_per_point: f32) -> f64 {
     }
 }
 
+/// Selects the active page axes, pairs facing pages on the same row, and derives
+/// ruler scale from rendered page widths while excluding the screen-only gutter.
 fn ruler_axes(geometry: &CanvasGeometry) -> Option<RulerAxes> {
     let page = geometry.active_page()?;
     let rotated = !page.rotation_degrees.is_multiple_of(180);
