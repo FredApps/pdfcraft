@@ -157,6 +157,40 @@ fn a_blocked_secondary_press_does_not_revoke_a_held_primary_page_drag() {
 }
 
 #[test]
+fn a_primary_drag_that_starts_in_blocked_chrome_stays_out_of_the_page_path() {
+    let ctx = Context::default();
+    let blocked = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 20.0));
+    let ruler = pos2(80.0, 10.0);
+
+    frame_excluding(&ctx, vec![], false, false, &[blocked]);
+
+    let down = frame_excluding(&ctx, vec![Event::PointerMoved(ruler), button(ruler, PointerButton::Primary, true)], false, false, &[blocked]);
+
+    assert!(down.blocked_press);
+    assert!(down.pos.is_none());
+    assert!(down.origin.is_none());
+    assert!(down.edges.is_empty());
+    assert!(!down.primary_down);
+
+    let dragging = pos2(80.0, 60.0);
+    let moved = frame_excluding(&ctx, vec![Event::PointerMoved(dragging)], false, false, &[blocked]);
+
+    assert!(moved.blocked_press);
+    assert!(moved.pos.is_none());
+    assert!(moved.origin.is_none());
+    assert!(moved.edges.is_empty());
+    assert!(!moved.primary_down);
+
+    let up = frame_excluding(&ctx, vec![button(dragging, PointerButton::Primary, false)], false, false, &[blocked]);
+
+    assert!(up.blocked_press);
+    assert!(up.pos.is_none());
+    assert!(up.origin.is_none());
+    assert!(up.edges.is_empty());
+    assert!(!up.primary_down);
+}
+
+#[test]
 fn a_dialog_hides_the_pointer_and_its_clicks_but_not_a_drag_the_pages_have() {
     let ctx = Context::default();
     let p = pos2(50.0, 50.0);

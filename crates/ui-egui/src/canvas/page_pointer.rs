@@ -51,7 +51,7 @@ impl PagePointer {
     /// The page pointer with gestures that begin in `blocked` retained as blocked through every
     /// egui pass of their release frame. A new frame clears the retained block.
     pub(crate) fn read_excluding(ui: &egui::Ui, resp: &egui::Response, modal: bool, blocked: &[Rect]) -> Self {
-        let (at, origin, edges, mut primary_down, mut any_down, raw_press_blocked) = ui.input(|i| {
+        let (at, origin, edges, mut primary_down, mut any_down, raw_press_blocked, raw_primary_press_blocked) = ui.input(|i| {
             (
                 i.pointer.interact_pos(),
                 i.pointer.press_origin(),
@@ -62,17 +62,27 @@ impl PagePointer {
                     Event::PointerButton { pos, pressed: true, .. } => blocked.iter().any(|rect| rect.contains(*pos)),
                     _ => false,
                 }),
+                i.events.iter().any(|event| match event {
+                    Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. } => blocked.iter().any(|rect| rect.contains(*pos)),
+                    _ => false,
+                }),
             )
         });
         let blocked_press_key = resp.id.with("blocked-press");
+        let primary_press_blocked_key = resp.id.with("primary-press-blocked");
         let clear_blocked_press_key = resp.id.with("clear-blocked-press");
         if ui.ctx().current_pass_index() == 0 && ui.data(|data| data.get_temp::<bool>(clear_blocked_press_key)).unwrap_or(false) {
             ui.data_mut(|data| {
                 data.remove_temp::<bool>(blocked_press_key);
+                data.remove_temp::<bool>(primary_press_blocked_key);
                 data.remove_temp::<bool>(clear_blocked_press_key);
             });
         }
         let blocked_at = |point: Pos2| blocked.iter().any(|rect| rect.contains(point));
+        if raw_primary_press_blocked {
+            ui.data_mut(|data| data.insert_temp(primary_press_blocked_key, true));
+        }
+        let primary_press_blocked = raw_primary_press_blocked || ui.data(|data| data.get_temp::<bool>(primary_press_blocked_key)).unwrap_or(false);
         let started_blocked = raw_press_blocked || origin.or_else(|| first_press(&edges)).is_some_and(blocked_at);
         if started_blocked {
             ui.data_mut(|data| data.insert_temp(blocked_press_key, true));
@@ -82,7 +92,9 @@ impl PagePointer {
         // A later button press over viewport chrome must not revoke a primary drag that the pages
         // already own. Keep the chrome press blocked for context-menu handling while delivering
         // the held primary pointer and its release to the active page operation.
-        let preserve_primary = blocked_press && ((primary_down && resp.dragged_by(PointerButton::Primary)) || (released && resp.drag_stopped()));
+        let preserve_primary = blocked_press
+            && !primary_press_blocked
+            && ((primary_down && resp.dragged_by(PointerButton::Primary)) || (released && resp.drag_stopped()));
         let raw_any_down = any_down;
         if blocked_press && !preserve_primary {
             primary_down = false;
