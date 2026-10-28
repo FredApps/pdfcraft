@@ -22,11 +22,16 @@ fn frame(ctx: &Context, events: Vec<Event>, area: bool) -> PagePointer {
 
 /// [`frame`], with a dialog open (`modal`) whose layer egui has not met.
 fn frame_with(ctx: &Context, events: Vec<Event>, area: bool, modal: bool) -> PagePointer {
+    frame_excluding(ctx, events, area, modal, &[])
+}
+
+/// [`frame_with`], with viewport chrome excluded from page interaction.
+fn frame_excluding(ctx: &Context, events: Vec<Event>, area: bool, modal: bool, blocked: &[Rect]) -> PagePointer {
     let mut seen = PagePointer::default();
     let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), events, ..Default::default() };
     let mut output = ctx.run_ui(input, |ui| {
         let (_, resp) = ui.allocate_exact_size(PAGES.size(), Sense::click_and_drag());
-        seen = PagePointer::read_excluding(ui, &resp, modal, &[]);
+        seen = PagePointer::read_excluding(ui, &resp, modal, blocked);
         if area {
             egui::Area::new(egui::Id::unique("over")).fixed_pos(OVER.min).show(ui.ctx(), |ui| {
                 ui.allocate_exact_size(OVER.size(), Sense::hover());
@@ -102,6 +107,23 @@ fn a_press_on_the_pages_keeps_the_pointer_until_its_release() {
     assert_eq!((up.pos, up.edges.as_slice()), (Some(end), [Edge::Release(end)].as_slice()), "the release is the pages' too");
     assert!(!up.primary_down && !up.any_down, "and the button is up");
     assert_eq!(frame(&ctx, vec![], true).pos, None, "then off the pages, the pointer is not theirs");
+}
+
+#[test]
+fn a_page_drag_keeps_its_pointer_when_it_enters_blocked_chrome() {
+    let ctx = Context::default();
+    let blocked = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 20.0));
+    let start = pos2(80.0, 40.0);
+    frame_excluding(&ctx, vec![], false, false, &[blocked]);
+    frame_excluding(&ctx, vec![Event::PointerMoved(start), button(start, PointerButton::Primary, true)], false, false, &[blocked]);
+
+    let over_ruler = pos2(80.0, 10.0);
+    let held = frame_excluding(&ctx, vec![Event::PointerMoved(over_ruler)], false, false, &[blocked]);
+
+    assert_eq!(held.pos, Some(over_ruler));
+    assert_eq!(held.origin, Some(start));
+    assert!(held.primary_down);
+    assert!(!held.blocked_press);
 }
 
 #[test]

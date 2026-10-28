@@ -96,7 +96,7 @@ impl PagePointer {
         let layer = ui.layer_id();
         let on_top =
             |p: &Pos2| !modal && !dragged_elsewhere(ui, resp) && resp.contains_pointer() && ui.ctx().layer_id_at(*p).is_none_or(|l| l == layer);
-        let pos = at.filter(|p| !blocked_press && (held || on_top(p)) && !blocked_at(*p));
+        let pos = at.filter(|p| !blocked_press && (held || (on_top(p) && !blocked_at(*p))));
         if blocked_press && (released || !raw_any_down) {
             ui.data_mut(|data| data.insert_temp(clear_blocked_press_key, true));
         }
