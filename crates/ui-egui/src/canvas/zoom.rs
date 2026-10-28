@@ -1,4 +1,6 @@
-use super::{DocInfo, DocView, Fit, GAP, MARGIN, PT, PageLayout, Pos2, Rect, SIDE, SavedDisplay, Vec2, device_pixels, pos2, vec2};
+use super::{
+    DocInfo, DocView, Fit, MARGIN, PAGE_ROW_GAP, PT, PageLayout, Pos2, Rect, SIDE, SavedDisplay, TWO_UP_COLUMN_GAP, Vec2, device_pixels, pos2, vec2,
+};
 
 /// The supported document zoom range: 1% through 6400%.
 pub const DOCUMENT_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.01..=64.0;
