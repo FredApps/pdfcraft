@@ -1,8 +1,8 @@
 use super::geometry::{
-    CARET_SIZE, HANDLES, clamp_to, corner_ratio, drawn_box, grabs_points, handle_pos, is_markup, point_handle, reshapable, reshaped, resizable,
+    CARET_SIZE, HANDLES, clamp_to, corner_ratio, drawn_box, grabs_points, handle_pos, held, is_markup, point_handle, reshapable, reshaped, resizable,
     resized, snapped_caret,
 };
-use super::paint::{drawn_shape, edit_anchor, erase, new_comment};
+use super::paint::{closes_at, drawn_shape, edit_anchor, erase, new_comment};
 use super::state::{Composer, ComposerKind, Gesture, PageCx};
 use super::{Annotation, CommentPrefs, CommentTool, DocInfo, DocView, Edit, Pos2, QuickTool, Rect, Shape, vec2};
 use crate::page_cursor::{Layer, Subject};
@@ -15,9 +15,6 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
     let page_rect = cx.xf.rect;
     let pressed_here = origin.is_some_and(|o| page_rect.contains(o));
     let over_page = pointer.is_some_and(|p| page_rect.contains(p));
-    // Shift holds a line, or the next side of connected lines, a polygon or a cloud, level or
-    // plumb (ortho).
-    let shift = ui.input(|i| i.modifiers.shift);
     let fill_grab = fill_grabs(cx, view);
     let draw_grab = draw_grabs(cx, view);
     let caret_text = if cx.tool == QuickTool::Comment(CommentTool::Caret) { view.page_text(cx.page) } else { None };
@@ -325,6 +322,8 @@ struct Gestures<'a> {
 
 impl Gestures<'_> {
     fn draw_shape(&self, view: &mut DocView, tool: CommentTool) -> bool {
+        // Shift holds a line level or plumb (ortho).
+        let shift = self.resp.ctx.input(|i| i.modifiers.shift);
         let Self { ui, resp, cx, pointer, origin, page_rect, pressed_here, over_page } = *self;
         let cv = &mut view.comments;
         if !cx.allowed {
@@ -388,6 +387,8 @@ impl Gestures<'_> {
     }
 
     fn click_points(&self, view: &mut DocView, tool: CommentTool) -> bool {
+        // Shift holds the next side of connected lines, a polygon or a cloud level or plumb.
+        let shift = self.resp.ctx.input(|i| i.modifiers.shift);
         let Self { ui, resp, cx, pointer, over_page, .. } = *self;
         let cv = &mut view.comments;
         if !cx.allowed {
