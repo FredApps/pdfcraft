@@ -237,6 +237,48 @@ fn fill_text_size_resizes_the_selected_text() {
     assert!(after > before * 2.0, "36 pt text has a taller box than 10 pt text: {before} -> {after}");
 }
 
+/// Dragging the Font size control with a placed text selected resizes it once, when the drag
+/// ends, to the size it was dragged to: the frame of the release must not put the old size back.
+#[test]
+fn dragging_the_font_size_resizes_the_selected_text_to_where_the_drag_ends() {
+    let mut h = harness();
+    h.state_mut().execute("sign.fill.text");
+    click(&mut h, 50.0, 250.0);
+    h.event(egui::Event::Text("Drag me".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let (id, annotation) = {
+        let s = h.state();
+        let id = s.views[0].id;
+        let a = s.session.get(id).unwrap().info.annotations.iter().find(|a| a.contents.as_deref() == Some("Drag me")).map(|a| (a.page, a.index));
+        (id, a.unwrap())
+    };
+    h.state_mut().views[0].comments.selected = Some(annotation);
+    h.run_steps(2);
+    let from = h
+        .query_all_by_role(egui::accesskit::Role::SpinButton)
+        .find(|n| n.value().is_some_and(|v| v.ends_with(" pt")))
+        .expect("the Font size control")
+        .rect()
+        .center();
+    let before = h.state().fill_text_size;
+    h.hover_at(from);
+    h.run_steps(1);
+    h.drag_at(from);
+    h.run_steps(1);
+    for dx in [10.0, 20.0, 30.0, 40.0] {
+        h.hover_at(from + egui::vec2(dx, 0.0));
+        h.run_steps(1);
+    }
+    h.drop_at(from + egui::vec2(40.0, 0.0));
+    h.run_steps(4);
+    let dragged = h.state().fill_text_size;
+    assert!(dragged > before, "the drag made the size larger: {before} -> {dragged}");
+    let placed = h.state().session.get(id).unwrap().comment_props(annotation.0, annotation.1).and_then(|p| p.font_size);
+    assert_eq!(placed, Some(dragged), "the selected text has the size the drag ended at");
+}
+
 /// The font sizes of the texts `text` drawn in the last frame.
 fn drawn_sizes(h: &Harness<'static, PdfCraftApp>, text: &str) -> Vec<f32> {
     fn walk(shape: &egui::Shape, text: &str, out: &mut Vec<f32>) {
