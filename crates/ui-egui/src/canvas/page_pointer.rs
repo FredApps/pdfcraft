@@ -79,8 +79,12 @@ impl PagePointer {
         }
         let blocked_press = started_blocked || ui.data(|data| data.get_temp::<bool>(blocked_press_key)).unwrap_or(false);
         let released = edges.iter().any(|edge| matches!(edge, Edge::Release(_)));
+        // A later button press over viewport chrome must not revoke a primary drag that the pages
+        // already own. Keep the chrome press blocked for context-menu handling while delivering
+        // the held primary pointer and its release to the active page operation.
+        let preserve_primary = blocked_press && ((primary_down && resp.dragged_by(PointerButton::Primary)) || (released && resp.drag_stopped()));
         let raw_any_down = any_down;
-        if blocked_press {
+        if blocked_press && !preserve_primary {
             primary_down = false;
             any_down = false;
         }
@@ -89,15 +93,16 @@ impl PagePointer {
         // pointer is outside the window. With a dialog open only a drag counts, up to the frame
         // it stops: on the frame one opens egui still gives the pages a press that lands under
         // it, and its click.
-        let held = !blocked_press && (resp.dragged() || resp.drag_stopped() || (!modal && resp.interact_pointer_pos().is_some()));
+        let held =
+            preserve_primary || (!blocked_press && (resp.dragged() || resp.drag_stopped() || (!modal && resp.interact_pointer_pos().is_some())));
         // `contains_pointer` alone also holds a few points under the edge of an Area over the
         // pages (egui's interact radius), so the top layer there must be the pages' own. A
         // dialog covers them from the frame it opens, before egui knows its layer.
         let layer = ui.layer_id();
         let on_top =
             |p: &Pos2| !modal && !dragged_elsewhere(ui, resp) && resp.contains_pointer() && ui.ctx().layer_id_at(*p).is_none_or(|l| l == layer);
-        let pos = at.filter(|p| !blocked_press && (held || (on_top(p) && !blocked_at(*p))));
-        if blocked_press && (released || !raw_any_down) {
+        let pos = at.filter(|p| preserve_primary || (!blocked_press && (held || (on_top(p) && !blocked_at(*p)))));
+        if blocked_press && !raw_any_down {
             ui.data_mut(|data| data.insert_temp(clear_blocked_press_key, true));
         }
         if !held {

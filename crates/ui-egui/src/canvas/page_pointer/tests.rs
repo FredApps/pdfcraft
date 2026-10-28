@@ -127,6 +127,36 @@ fn a_page_drag_keeps_its_pointer_when_it_enters_blocked_chrome() {
 }
 
 #[test]
+fn a_blocked_secondary_press_does_not_revoke_a_held_primary_page_drag() {
+    let ctx = Context::default();
+    let blocked = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 20.0));
+    let start = pos2(80.0, 40.0);
+    frame_excluding(&ctx, vec![], false, false, &[blocked]);
+    frame_excluding(&ctx, vec![Event::PointerMoved(start), button(start, PointerButton::Primary, true)], false, false, &[blocked]);
+
+    // Move far enough to establish the page's primary drag before entering the ruler.
+    let dragging = pos2(120.0, 60.0);
+    frame_excluding(&ctx, vec![Event::PointerMoved(dragging)], false, false, &[blocked]);
+
+    let over_ruler = pos2(120.0, 10.0);
+    let secondary_down =
+        frame_excluding(&ctx, vec![Event::PointerMoved(over_ruler), button(over_ruler, PointerButton::Secondary, true)], false, false, &[blocked]);
+    assert!(secondary_down.blocked_press, "the ruler press must remain blocked for page context-menu handling");
+    assert_eq!(secondary_down.pos, Some(over_ruler), "the held primary drag keeps its pointer");
+    assert!(secondary_down.primary_down);
+
+    let primary_up = frame_excluding(&ctx, vec![button(over_ruler, PointerButton::Primary, false)], false, false, &[blocked]);
+    assert!(primary_up.blocked_press);
+    assert_eq!(primary_up.pos, Some(over_ruler));
+    assert_eq!(primary_up.edges.as_slice(), [Edge::Release(over_ruler)].as_slice());
+    assert!(!primary_up.primary_down);
+
+    let secondary_up = frame_excluding(&ctx, vec![button(over_ruler, PointerButton::Secondary, false)], false, false, &[blocked]);
+    assert!(secondary_up.blocked_press);
+    assert!(secondary_up.pos.is_none());
+}
+
+#[test]
 fn a_dialog_hides_the_pointer_and_its_clicks_but_not_a_drag_the_pages_have() {
     let ctx = Context::default();
     let p = pos2(50.0, 50.0);
