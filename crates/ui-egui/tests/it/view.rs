@@ -1575,6 +1575,41 @@ fn fonts_tab_lists_fonts_and_embedding() {
 }
 
 #[test]
+fn the_hand_tool_ignores_ruler_origin_but_keeps_a_document_origin_across_it() {
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "600"), ("quick", "hand"), ("rulers", "on")]);
+    let viewport = h.state().views[0].viewport_rect();
+    let horizontal_ruler = egui::pos2(viewport.center().x, viewport.top() + pdfcraft_ui_egui::ruler::HORIZONTAL_RULER_HEIGHT / 2.0);
+    let document = viewport.center();
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    let page = |h: &Harness<'static, PdfCraftApp>| rect(h, 0).expect("page 1 on screen").min;
+
+    // A Hand drag beginning on the horizontal ruler never pans, even after it enters the document.
+    h.hover_at(horizontal_ruler);
+    h.run_steps(2);
+    let before_blocked = page(&h);
+    h.event(button(horizontal_ruler, true));
+    h.step();
+    let inside_document = horizontal_ruler + egui::vec2(0.0, 120.0);
+    h.event(egui::Event::PointerMoved(inside_document));
+    h.step();
+    h.event(button(inside_document, false));
+    h.run_steps(2);
+    assert_eq!(page(&h), before_blocked, "a Hand drag that starts on a ruler must not pan");
+
+    // A Hand drag beginning in the document keeps panning when the pointer crosses the ruler.
+    h.hover_at(document);
+    h.run_steps(2);
+    let before_allowed = page(&h);
+    h.event(button(document, true));
+    h.step();
+    h.event(egui::Event::PointerMoved(horizontal_ruler));
+    h.step();
+    assert_eq!(page(&h) - before_allowed, horizontal_ruler - document, "a document-originated Hand drag must remain active across the ruler",);
+    h.event(button(horizontal_ruler, false));
+    h.run_steps(2);
+}
+
+#[test]
 fn the_hand_tool_pans_by_dragging() {
     let mut h = harness(&[("layout", "continuous"), ("zoom", "150"), ("quick", "hand")]);
     h.run_steps(4);

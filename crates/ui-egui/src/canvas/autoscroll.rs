@@ -316,17 +316,6 @@ mod tests {
     }
 
     #[test]
-    fn hand_pan_gate_uses_the_press_origin_not_the_current_pointer_position() {
-        let blocked = [Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(400.0, 24.0))];
-        let ruler_origin = egui::pos2(100.0, 12.0);
-        let document_origin = egui::pos2(100.0, 100.0);
-
-        assert!(press_origin_is_blocked(ruler_origin, &blocked));
-        assert!(!press_origin_is_blocked(document_origin, &blocked));
-        assert!(!press_origin_is_blocked(document_origin, &blocked), "a document-started drag remains allowed after crossing a ruler");
-    }
-
-    #[test]
     fn middle_drag_pans_one_to_one_and_owns_the_button_until_release() {
         let ctx = Context::default();
         let mut scroll = AutoScroll::default();
