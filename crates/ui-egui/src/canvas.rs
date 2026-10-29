@@ -1942,7 +1942,9 @@ fn draw_pages(
     if view.continuous {
         view.current = current;
     }
-    if !ptr.blocked_press {
+    if ptr.blocked_press {
+        egui::Popup::close_id(ui.ctx(), egui::Popup::default_response_id(&resp));
+    } else {
         resp.context_menu(|ui| {
             // Preparing a form: the selected field's menu.
             if preparing && let Some((name, wi)) = view.prepare.selected.clone() {
@@ -2559,7 +2561,7 @@ fn frame_overlays(
         view.pending_edit = Some(e);
     }
     let editor_interaction = rulers::page_interaction_rect(rulers_enabled, view.presentation.is_some(), view.organize, view.viewport_rect());
-    if let Some(e) = crate::edit_text_ui::overlay(ui.ctx(), view, info, editor_interaction) {
+    if let Some(e) = crate::edit_text_ui::overlay(ui.ctx(), view, info, editor_interaction, ruler_interaction) {
         view.pending_edit = Some(e);
     }
     let text_box = crate::forms_ui::text_box(doc, view, form);

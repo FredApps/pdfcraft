@@ -476,12 +476,12 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, lines: &[pdfcraft_engine::Text
 }
 
 /// The inline editor; returns the edit once the text is applied.
-pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, interaction_rect: Rect) -> Option<Edit> {
+pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, interaction_rect: Rect, ruler_interaction: bool) -> Option<Edit> {
     // Clicks outside the document (the Format text panel) keep the paragraph open. Ruler clicks
     // also keep it open: ruler chrome is inside the viewport but outside page interaction. Where
     // the click landed is `interact_pos`: `latest_pos` is gone on the frame a tap lifts.
     let pointer = ctx.input(|i| i.pointer.interact_pos());
-    let (outside, ruler_click) = click_regions(pointer, view.viewport_rect(), interaction_rect);
+    let (outside, _) = click_regions(pointer, view.viewport_rect(), interaction_rect);
     let page = view.line_editor.as_ref()?.page;
     let xf = view.page_xform(page)?;
     let hold = view.objects.hold_editor;
@@ -628,13 +628,13 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, i
                 let lost = lost_focus_once(&r, &mut ed.had_focus);
                 let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 let apply = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
-                if lost && ruler_click {
+                if lost && ruler_interaction {
                     r.request_focus();
                     ed.had_focus = true;
                 }
                 if esc {
                     done = Some(false);
-                } else if apply || (lost && !outside && !ruler_click && !hold) {
+                } else if apply || (lost && !outside && !ruler_interaction && !hold) {
                     done = Some(true);
                 }
             });
