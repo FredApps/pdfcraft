@@ -2557,13 +2557,13 @@ fn frame_overlays(
         view.pending_edit = Some(e);
     }
     let text_box = crate::forms_ui::text_box(doc, view, form);
-    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, form, primary_down, text_box.as_ref(), today) {
+    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, form, primary_down, text_box.as_ref(), today, editor_interaction) {
         view.pending_edit = Some(e);
     }
-    if let Some(e) = crate::fill_sign::type_box(ui.ctx(), view, info, author) {
+    if let Some(e) = crate::fill_sign::type_box(ui.ctx(), view, info, author, editor_interaction) {
         view.pending_edit = Some(e);
     }
-    let (typed, text_done) = crate::content_ui::editor(ui.ctx(), view, info, added);
+    let (typed, text_done) = crate::content_ui::editor(ui.ctx(), view, info, added, editor_interaction);
     if typed.is_some() {
         view.pending_edit = typed;
     }

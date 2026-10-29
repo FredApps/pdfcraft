@@ -477,9 +477,11 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, lines: &[pdfcraft_engine::Text
 
 /// The inline editor; returns the edit once the text is applied.
 pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, interaction_rect: Rect) -> Option<Edit> {
-    // Clicks outside the document (the Format text panel) keep the paragraph open. Where the
-    // click landed is `interact_pos`: `latest_pos` is gone on the frame a tap lifts.
-    let outside = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !view.viewport_rect().contains(p));
+    // Clicks outside the document (the Format text panel) keep the paragraph open. Ruler clicks
+    // also keep it open: ruler chrome is inside the viewport but outside page interaction. Where
+    // the click landed is `interact_pos`: `latest_pos` is gone on the frame a tap lifts.
+    let pointer = ctx.input(|i| i.pointer.interact_pos());
+    let (outside, ruler_click) = click_regions(pointer, view.viewport_rect(), interaction_rect);
     let page = view.line_editor.as_ref()?.page;
     let xf = view.page_xform(page)?;
     let hold = view.objects.hold_editor;
@@ -626,9 +628,13 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, i
                 let lost = lost_focus_once(&r, &mut ed.had_focus);
                 let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 let apply = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
+                if lost && ruler_click {
+                    r.request_focus();
+                    ed.had_focus = true;
+                }
                 if esc {
                     done = Some(false);
-                } else if apply || (lost && !outside && !hold) {
+                } else if apply || (lost && !outside && !ruler_click && !hold) {
                     done = Some(true);
                 }
             });
@@ -666,6 +672,13 @@ pub(crate) fn finished_edit(ed: LineEditor) -> Option<Edit> {
     })
 }
 
+/// Classify a pointer position relative to the document viewport and page interaction area.
+fn click_regions(pointer: Option<Pos2>, viewport: Rect, interaction_rect: Rect) -> (bool, bool) {
+    let outside = pointer.is_some_and(|point| !viewport.contains(point));
+    let ruler = pointer.is_some_and(|point| viewport.contains(point) && !interaction_rect.contains(point));
+    (outside, ruler)
+}
+
 /// Whether an editor's text box `r` lost the keyboard this frame, given whether it `had` it at
 /// the end of the editor's last frame (updated here). egui's `lost_focus` holds for a second
 /// frame as well, and an editor that judges a click away by where the click landed must judge it
@@ -679,6 +692,16 @@ pub(crate) fn lost_focus_once(r: &egui::Response, had: &mut bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_regions_distinguish_rulers_from_outside_clicks() {
+        let viewport = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 600.0));
+        let interaction = Rect::from_min_max(egui::pos2(24.0, 24.0), viewport.max);
+        assert_eq!(click_regions(Some(egui::pos2(100.0, 100.0)), viewport, interaction), (false, false));
+        assert_eq!(click_regions(Some(egui::pos2(100.0, 10.0)), viewport, interaction), (false, true));
+        assert_eq!(click_regions(Some(egui::pos2(-10.0, 100.0)), viewport, interaction), (true, false));
+        assert_eq!(click_regions(None, viewport, interaction), (false, false));
+    }
 
     #[test]
     fn the_rotate_knob_moves_below_when_there_is_no_room_above() {

@@ -304,16 +304,17 @@ struct ComboEditor<'a> {
     rect: Rect,
     zoom: f32,
     index: usize,
+    interaction_rect: Rect,
 }
 
 fn combo_editor(ctx: &egui::Context, view: &mut DocView, editor: ComboEditor<'_>) {
-    let ComboEditor { form, field: f, widget: w, rect, zoom, index: widget } = editor;
+    let ComboEditor { form, field: f, widget: w, rect, zoom, index: widget, interaction_rect } = editor;
     let mut enter = false;
     egui::Area::new(egui::Id::unique(("form-editor", view.id.0)))
         .fade_in(false)
         .order(egui::Order::Foreground)
         .fixed_pos(rect.min)
-        .constrain_to(view.viewport_rect())
+        .constrain_to(interaction_rect)
         .constrain(false)
         .show(ctx, |ui| {
             ui.set_min_size(rect.size());
@@ -352,7 +353,7 @@ const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "Jun
 
 /// The date picker under a focused date field: a month of days, and a Today button under them.
 /// Returns the picked date, formatted with the field's own format.
-fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &str, today: (i64, u32, u32)) -> Option<String> {
+fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &str, today: (i64, u32, u32), interaction_rect: Rect) -> Option<String> {
     use pdfcraft_engine::form_scripts::{DateTime, format_date, parse_date};
     let fx = view.forms.focus.as_mut()?;
     let current = parse_date(&fx.text, fmt);
@@ -372,6 +373,8 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
     let area = egui::Area::new(egui::Id::unique(("date-picker", view.id.0)))
         .order(egui::Order::Foreground)
         .fixed_pos(field.left_bottom() + vec2(0.0, 2.0))
+        .constrain_to(interaction_rect)
+        .constrain(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -738,6 +741,7 @@ pub(crate) fn overlay(
     primary_down: bool,
     text_box: Option<&form_appearance::TextBox>,
     today: (i64, u32, u32),
+    interaction_rect: Rect,
 ) -> Option<Edit> {
     let pressed = view.forms.pressed;
     if !primary_down {
@@ -782,7 +786,7 @@ pub(crate) fn overlay(
                 .fade_in(false)
                 .order(egui::Order::Foreground)
                 .fixed_pos(rect.min)
-                .constrain_to(view.viewport_rect())
+                .constrain_to(interaction_rect)
                 .constrain(false)
                 .show(ctx, |ui| {
                     ui.set_min_size(rect.size());
@@ -843,7 +847,7 @@ pub(crate) fn overlay(
                 });
             // Date fields: a calendar under the field (Acrobat's date picker).
             if let pdfcraft_engine::form_scripts::Format::Date(fmt) = &f.actions.format
-                && let Some(picked) = calendar(ctx, view, rect, fmt, today)
+                && let Some(picked) = calendar(ctx, view, rect, fmt, today, interaction_rect)
             {
                 if let Some(fx) = view.forms.focus.as_mut() {
                     fx.text = picked;
@@ -856,11 +860,13 @@ pub(crate) fn overlay(
             // An editable combo box has a text box over the field as well as its list (ISO
             // 32000-2 Table 233, Edit).
             if editable_combo(f) {
-                combo_editor(ctx, view, ComboEditor { form, field: f, widget: w, rect, zoom, index: focus.widget });
+                combo_editor(ctx, view, ComboEditor { form, field: f, widget: w, rect, zoom, index: focus.widget, interaction_rect });
             }
             let resp = egui::Area::new(egui::Id::unique(("form-choices", view.id.0)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(rect.left_bottom() + vec2(0.0, 2.0))
+                .constrain_to(interaction_rect)
+                .constrain(false)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.set_min_width(rect.width().max(160.0));
