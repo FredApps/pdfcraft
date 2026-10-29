@@ -374,7 +374,6 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
         .order(egui::Order::Foreground)
         .fixed_pos(field.left_bottom() + vec2(0.0, 2.0))
         .constrain_to(interaction_rect)
-        .constrain(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.horizontal(|ui| {
