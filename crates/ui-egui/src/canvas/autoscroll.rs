@@ -52,6 +52,11 @@ impl AutoScroll {
         self.update_for_platform(ui, viewport, blocked, organize, cfg!(target_os = "linux"))
     }
 
+    /// Update the platform-selected middle-button behavior while excluding blocked press origins.
+    ///
+    /// `supported` selects latched auto-scroll; otherwise the held-button drag path is used. The
+    /// exclusion applies only when a gesture starts, so an accepted gesture can cross viewport
+    /// chrome without being cancelled.
     fn update_for_platform(&mut self, ui: &egui::Ui, viewport: egui::Rect, blocked: &[Rect], organize: bool, supported: bool) -> Vec2 {
         if !supported {
             return self.update_drag(ui, viewport, blocked);
@@ -293,6 +298,7 @@ mod tests {
         output.textures_delta.clear();
     }
 
+    /// Both platform paths reject ruler-originated presses and accept document-originated ones.
     #[test]
     fn middle_press_on_a_blocked_ruler_never_starts_scroll_but_document_press_does() {
         let blocked = [Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(400.0, 24.0))];

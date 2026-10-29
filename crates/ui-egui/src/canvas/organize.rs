@@ -267,6 +267,10 @@ fn request_sharper(
     }
 }
 
+/// Draw the Organize Pages grid and apply its scrolling, selection, and page operations.
+///
+/// Organize mode has no ruler chrome, so its middle-button scrolling uses an empty blocked-region
+/// list while retaining the mode-specific auto-scroll anchor treatment.
 pub(super) fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool, unobstructed: bool, ui: &mut egui::Ui, t: &Tokens) {
     let ppp = ui.ctx().pixels_per_point();
     // The page image scales with the zoom; the padding and the page number don't.

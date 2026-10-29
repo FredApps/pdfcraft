@@ -2706,13 +2706,16 @@ fn pinch_zoom(ui: &egui::Ui, view: &mut DocView, zoom_delta: f32, navigation_rec
     }
 }
 
-/// The middle-button auto-scroll's delta, and the edge scroll a drawing in progress asks for: the
-/// pointer in a band along any edge (or just past it) scrolls the view that way, so a point
-/// beyond what is shown can be reached without letting go of the tool.
+/// Whether a gesture began in viewport chrome that must not acquire page input.
 fn press_origin_is_blocked(origin: Pos2, blocked: &[Rect]) -> bool {
     blocked.iter().any(|rect| rect.contains(origin))
 }
 
+/// Return the middle-button scroll delta and the edge-scroll delta requested by a drawing.
+///
+/// New middle-button gestures may start only outside `blocked`; an active gesture may continue
+/// after crossing those rectangles. Drawing edge-scroll remains based on the full viewport so a
+/// point beyond the visible page can be reached without releasing the tool.
 fn auto_scroll_deltas(ui: &egui::Ui, view: &mut DocView, avail: Rect, blocked: &[Rect], unobstructed: bool) -> (Vec2, Vec2) {
     let auto_delta = if unobstructed {
         view.auto_scroll.update(ui, avail, blocked, false)

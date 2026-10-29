@@ -1574,6 +1574,7 @@ fn fonts_tab_lists_fonts_and_embedding() {
     h.get_by_label_contains("Not embedded");
 }
 
+/// A Hand drag cannot start on ruler chrome, but a page drag stays active when crossing it.
 #[test]
 fn the_hand_tool_ignores_ruler_origin_but_keeps_a_document_origin_across_it() {
     let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "600"), ("quick", "hand"), ("rulers", "on")]);
