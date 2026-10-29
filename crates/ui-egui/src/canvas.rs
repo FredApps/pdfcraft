@@ -891,6 +891,7 @@ struct PageOut {
     open_initials: bool,
     open_signature: bool,
     open_table: Option<(usize, [f64; 4])>,
+    ruler_interaction: bool,
     primary_down: bool,
     refused: Option<String>,
     stamp_placed: bool,
@@ -1874,6 +1875,7 @@ fn draw_pages(
         wanted, visible_now, mut current, best_overlap, current_overlap, current_height, pressed_page, calc_hover, out: page_out, ..
     } = frame;
     let PageOut {
+        ruler_interaction: _,
         mut canvas_action,
         clicked_link,
         mut copy_selected,
@@ -2063,6 +2065,7 @@ fn draw_pages(
         open_initials,
         open_signature,
         open_table,
+        ruler_interaction: ptr.blocked_interaction.is_some(),
         primary_down: ptr.primary_down,
         refused,
         stamp_placed,
@@ -2530,6 +2533,7 @@ fn frame_overlays(
     view: &mut DocView,
     env: &PageEnv<'_>,
     primary_down: bool,
+    ruler_interaction: bool,
     hover_text: Option<(Pos2, String)>,
     rulers_enabled: bool,
 ) -> bool {
@@ -2557,13 +2561,19 @@ fn frame_overlays(
         view.pending_edit = Some(e);
     }
     let text_box = crate::forms_ui::text_box(doc, view, form);
-    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, form, primary_down, text_box.as_ref(), today, editor_interaction) {
+    if let Some(e) = crate::forms_ui::overlay(
+        ui.ctx(),
+        view,
+        info,
+        form,
+        crate::forms_ui::OverlayInput { primary_down, text_box: text_box.as_ref(), today, interaction_rect: editor_interaction, ruler_interaction },
+    ) {
         view.pending_edit = Some(e);
     }
-    if let Some(e) = crate::fill_sign::type_box(ui.ctx(), view, info, author, editor_interaction) {
+    if let Some(e) = crate::fill_sign::type_box(ui.ctx(), view, info, author, editor_interaction, ruler_interaction) {
         view.pending_edit = Some(e);
     }
-    let (typed, text_done) = crate::content_ui::editor(ui.ctx(), view, info, added, editor_interaction);
+    let (typed, text_done) = crate::content_ui::editor(ui.ctx(), view, info, added, editor_interaction, ruler_interaction);
     if typed.is_some() {
         view.pending_edit = typed;
     }
@@ -3068,6 +3078,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         open_initials,
         open_signature,
         open_table,
+        ruler_interaction,
         primary_down,
         mut refused,
         stamp_placed,
@@ -3095,7 +3106,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let pan_held = track_scroll(ui, view, &out, glide);
     plan_renders(ui, view, info, out.inner, &RenderPlan { visible_pages: &visible_pages, tag, scale, sharp_held, pan_held, hand });
 
-    let text_done = frame_overlays(ui, view, &env, primary_down, hover_text, rulers_enabled);
+    let text_done = frame_overlays(ui, view, &env, primary_down, ruler_interaction, hover_text, rulers_enabled);
     if let Some(why) = view.objects.notice.take() {
         refused = Some(why);
     }

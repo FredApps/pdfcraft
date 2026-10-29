@@ -511,7 +511,14 @@ pub enum FillAction {
 }
 
 /// The in-place editor for typed text. Returns the edit once committed.
-pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, author: &str, interaction_rect: Rect) -> Option<Edit> {
+pub(crate) fn type_box(
+    ctx: &egui::Context,
+    view: &mut DocView,
+    info: &DocInfo,
+    author: &str,
+    interaction_rect: Rect,
+    ruler_interaction: bool,
+) -> Option<Edit> {
     let tb = view.fill_text.clone()?;
     let xf = view.page_xform(tb.page)?;
     let v = info.pages.get(tb.page)?.user_to_view(tb.at[0] as f32, tb.at[1] as f32);
@@ -554,6 +561,8 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
             }
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
+            } else if r.lost_focus() && ruler_interaction {
+                r.request_focus();
             } else if r.lost_focus() {
                 commit = true;
             }

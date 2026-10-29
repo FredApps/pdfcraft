@@ -729,19 +729,20 @@ fn step_radio(view: &mut DocView, f: &FormField, widget: usize, forward: bool) -
     edit
 }
 
+/// Per-frame input for the focused field overlay.
+pub(crate) struct OverlayInput<'a> {
+    pub primary_down: bool,
+    pub text_box: Option<&'a form_appearance::TextBox>,
+    pub today: (i64, u32, u32),
+    pub interaction_rect: Rect,
+    pub ruler_interaction: bool,
+}
+
 /// The in-place editor or option list for the focused field. Returns an edit to apply.
 /// `text_box`, for a text field that doesn't scroll, is how its widget lays text out: the editor
 /// then takes no more than fits.
-pub(crate) fn overlay(
-    ctx: &egui::Context,
-    view: &mut DocView,
-    info: &DocInfo,
-    form: &[FormField],
-    primary_down: bool,
-    text_box: Option<&form_appearance::TextBox>,
-    today: (i64, u32, u32),
-    interaction_rect: Rect,
-) -> Option<Edit> {
+pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, form: &[FormField], input: OverlayInput<'_>) -> Option<Edit> {
+    let OverlayInput { primary_down, text_box, today, interaction_rect, ruler_interaction } = input;
     let pressed = view.forms.pressed;
     if !primary_down {
         view.forms.pressed = false;
@@ -768,7 +769,8 @@ pub(crate) fn overlay(
     // Whether a click this frame landed outside the field. Where it landed is `interact_pos`: a
     // tap's release comes with `PointerGone` (egui-winit sends one with every touch release, and
     // winit reports Windows pen input as touch), which clears `hover_pos`.
-    let clicked_outside = || ctx.input(|i| i.pointer.any_click() && !i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
+    let clicked_outside =
+        || !ruler_interaction && ctx.input(|i| i.pointer.any_click() && !i.pointer.interact_pos().is_some_and(|p| rect.contains(p)));
     let zoom = xf.zoom();
     let t = Tokens::get(ctx);
     let mut edit = None;
@@ -827,11 +829,16 @@ pub(crate) fn overlay(
                     let (enter, esc, tab, shift) = ui.input(|i| {
                         (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift)
                     });
+                    if lost && ruler_interaction {
+                        r.request_focus();
+                        fx.had_focus = true;
+                    }
                     if esc {
                         close = true;
                     } else if tab {
                         next = Some(!shift);
                     } else if lost
+                        && !ruler_interaction
                         && (!multiline || !enter)
                         && !fx.calendar_rect.is_some_and(|c| ui.input(|i| i.pointer.interact_pos().is_some_and(|p| c.contains(p))))
                     {

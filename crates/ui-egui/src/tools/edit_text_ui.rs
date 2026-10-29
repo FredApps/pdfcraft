@@ -699,7 +699,11 @@ mod tests {
         let interaction = Rect::from_min_max(egui::pos2(24.0, 24.0), viewport.max);
         assert_eq!(click_regions(Some(egui::pos2(100.0, 100.0)), viewport, interaction), (false, false));
         assert_eq!(click_regions(Some(egui::pos2(100.0, 10.0)), viewport, interaction), (false, true));
+        assert_eq!(click_regions(Some(egui::pos2(10.0, 100.0)), viewport, interaction), (false, true));
         assert_eq!(click_regions(Some(egui::pos2(-10.0, 100.0)), viewport, interaction), (true, false));
+        assert_eq!(click_regions(Some(viewport.min), viewport, interaction), (false, true));
+        assert_eq!(click_regions(Some(interaction.min), viewport, interaction), (false, false));
+        assert_eq!(click_regions(Some(viewport.max), viewport, interaction), (false, false));
         assert_eq!(click_regions(None, viewport, interaction), (false, false));
     }
 

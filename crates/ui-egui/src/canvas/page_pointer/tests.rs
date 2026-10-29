@@ -167,6 +167,7 @@ fn a_primary_drag_that_starts_in_blocked_chrome_stays_out_of_the_page_path() {
     let down = frame_excluding(&ctx, vec![Event::PointerMoved(ruler), button(ruler, PointerButton::Primary, true)], false, false, &[blocked]);
 
     assert!(down.blocked_press);
+    assert_eq!(down.blocked_interaction, Some(ruler));
     assert!(down.pos.is_none());
     assert!(down.origin.is_none());
     assert!(down.edges.is_empty());
@@ -176,6 +177,7 @@ fn a_primary_drag_that_starts_in_blocked_chrome_stays_out_of_the_page_path() {
     let moved = frame_excluding(&ctx, vec![Event::PointerMoved(dragging)], false, false, &[blocked]);
 
     assert!(moved.blocked_press);
+    assert_eq!(moved.blocked_interaction, None, "hovering after the press is not a new ruler interaction");
     assert!(moved.pos.is_none());
     assert!(moved.origin.is_none());
     assert!(moved.edges.is_empty());

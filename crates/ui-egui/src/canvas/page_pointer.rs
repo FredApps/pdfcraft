@@ -45,13 +45,17 @@ pub(crate) struct PagePointer {
     pub any_down: bool,
     /// The current interaction began in excluded viewport chrome.
     pub blocked_press: bool,
+    /// A pointer-button edge in excluded viewport chrome in this frame. Unlike `blocked_press`,
+    /// this is not retained into later frames, so hover or a past ruler click cannot suppress an
+    /// editor's ordinary focus-loss handling.
+    pub blocked_interaction: Option<Pos2>,
 }
 
 impl PagePointer {
     /// The page pointer with gestures that begin in `blocked` retained as blocked through every
     /// egui pass of their release frame. A new frame clears the retained block.
     pub(crate) fn read_excluding(ui: &egui::Ui, resp: &egui::Response, modal: bool, blocked: &[Rect]) -> Self {
-        let (at, origin, edges, mut primary_down, mut any_down, raw_press_blocked, raw_primary_press_blocked) = ui.input(|i| {
+        let (at, origin, edges, mut primary_down, mut any_down, raw_press_blocked, raw_primary_press_blocked, blocked_interaction) = ui.input(|i| {
             (
                 i.pointer.interact_pos(),
                 i.pointer.press_origin(),
@@ -65,6 +69,10 @@ impl PagePointer {
                 i.events.iter().any(|event| match event {
                     Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. } => blocked.iter().any(|rect| rect.contains(*pos)),
                     _ => false,
+                }),
+                i.events.iter().find_map(|event| match event {
+                    Event::PointerButton { pos, .. } if pos.is_finite() && blocked.iter().any(|rect| rect.contains(*pos)) => Some(*pos),
+                    _ => None,
                 }),
             )
         });
@@ -118,9 +126,9 @@ impl PagePointer {
             ui.data_mut(|data| data.insert_temp(clear_blocked_press_key, true));
         }
         if !held {
-            return Self { pos, origin: None, edges: Vec::new(), primary_down, any_down, blocked_press };
+            return Self { pos, origin: None, edges: Vec::new(), primary_down, any_down, blocked_press, blocked_interaction };
         }
-        Self { pos, origin: origin.or_else(|| first_press(&edges)), edges, primary_down, any_down, blocked_press }
+        Self { pos, origin: origin.or_else(|| first_press(&edges)), edges, primary_down, any_down, blocked_press, blocked_interaction }
     }
 
     /// Where the pointer is, when it is inside `r`.
