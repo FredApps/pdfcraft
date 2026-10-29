@@ -6371,6 +6371,36 @@ fn leaving_organize_goes_back_to_the_workspace_panel() {
     assert_eq!(h.state().left, LeftPanel::AllTools);
 }
 
+/// A parked ruler pointer is not a ruler interaction and cannot make the text editor reclaim
+/// focus from the command palette.
+#[test]
+fn command_palette_closes_text_editor_with_pointer_parked_over_a_ruler() {
+    let mut h = harness(1, |app| app.show_rulers = true);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let text = egui::pos2(page.left() + 40.0 / 200.0 * page.width(), page.top() + (300.0 - 158.0) / 300.0 * page.height());
+    h.hover_at(text);
+    h.run_steps(1);
+    h.drag_at(text);
+    h.run_steps(1);
+    h.drop_at(text);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_some(), "the line opens for editing");
+
+    let viewport = h.state().views[0].viewport_rect();
+    let ruler = egui::pos2(viewport.center().x, viewport.top() + pdfcraft_ui_egui::ruler::HORIZONTAL_RULER_HEIGHT / 2.0);
+    h.hover_at(ruler);
+    h.run_steps(2);
+    assert!(h.state().views[0].line_editor.is_some(), "hovering the ruler alone keeps the editor open");
+
+    h.state_mut().palette_open = true;
+    h.run_steps(3);
+    assert!(h.state().palette_open, "the command palette remains open");
+    assert!(h.state().views[0].line_editor.is_none(), "the editor does not reclaim focus from the palette");
+}
+
 /// The Read mode command (not the mode bar) applies a paragraph still open in the editor, as
 /// putting the Edit text tool down does; left open, it would stay drawn in Read mode with no tool.
 #[test]
