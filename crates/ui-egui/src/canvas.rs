@@ -2411,6 +2411,7 @@ fn close_requested_tab(app: &mut PdfCraftApp, index: usize) -> bool {
 #[derive(Clone, Copy)]
 struct ScrollGeometry<'a> {
     rects: &'a [Rect],
+    blocked: &'a [Rect],
     y_shift: f32,
     content_w: f32,
     content_h: f32,
@@ -2421,7 +2422,7 @@ struct ScrollGeometry<'a> {
 
 /// The page view's scroll area, with the offset this frame's jumps, drags and zoom anchor ask for.
 fn page_scroll_area(ui: &egui::Ui, view: &mut DocView, geometry: &ScrollGeometry<'_>) -> egui::ScrollArea {
-    let ScrollGeometry { rects, y_shift, content_w, content_h, avail, middle_gesture, hand } = *geometry;
+    let ScrollGeometry { rects, blocked, y_shift, content_w, content_h, avail, middle_gesture, hand } = *geometry;
     let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).scroll_source(egui::scroll_area::ScrollSource {
         drag: if middle_gesture {
             egui::scroll_area::DragScroll::Never
@@ -2450,6 +2451,7 @@ fn page_scroll_area(ui: &egui::Ui, view: &mut DocView, geometry: &ScrollGeometry
     // below still wins.
     if hand
         && !middle_gesture
+        && PagePointer::unblocked_press_origin(ui, blocked).is_some()
         && let Some(id) = view.page_widget.filter(|id| ui.ctx().is_being_dragged(*id))
     {
         let moved = if ui.ctx().drag_started_id() == Some(id) {
@@ -2707,9 +2709,13 @@ fn pinch_zoom(ui: &egui::Ui, view: &mut DocView, zoom_delta: f32, navigation_rec
 /// The middle-button auto-scroll's delta, and the edge scroll a drawing in progress asks for: the
 /// pointer in a band along any edge (or just past it) scrolls the view that way, so a point
 /// beyond what is shown can be reached without letting go of the tool.
-fn auto_scroll_deltas(ui: &egui::Ui, view: &mut DocView, avail: Rect, unobstructed: bool) -> (Vec2, Vec2) {
+fn press_origin_is_blocked(origin: Pos2, blocked: &[Rect]) -> bool {
+    blocked.iter().any(|rect| rect.contains(origin))
+}
+
+fn auto_scroll_deltas(ui: &egui::Ui, view: &mut DocView, avail: Rect, blocked: &[Rect], unobstructed: bool) -> (Vec2, Vec2) {
     let auto_delta = if unobstructed {
-        view.auto_scroll.update(ui, avail, false)
+        view.auto_scroll.update(ui, avail, blocked, false)
     } else {
         view.auto_scroll.cancel();
         Vec2::ZERO
@@ -2903,7 +2909,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let present = presentation_click_state(ui, view, navigation_rect, navigation_enabled && app.quick_tool == QuickTool::Select);
     pinch_zoom(ui, view, zoom_delta, navigation_rect, navigation_enabled);
     view.viewport_screen = avail;
-    let (auto_delta, edge_delta) = auto_scroll_deltas(ui, view, avail, unobstructed);
+    let blocked = rulers::blocked_rects(rulers_enabled, view.presentation.is_some(), view.organize, avail);
+    let (auto_delta, edge_delta) = auto_scroll_deltas(ui, view, avail, &blocked, unobstructed);
 
     let content_w = view.content_width(info, avail.width());
     let rects = view.layout(info, content_w, ui.ctx().pixels_per_point());
@@ -2946,7 +2953,16 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let mut scroll = page_scroll_area(
         ui,
         view,
-        &ScrollGeometry { rects: &rects, y_shift, content_w, content_h, avail, middle_gesture, hand: app.quick_tool == QuickTool::Hand },
+        &ScrollGeometry {
+            rects: &rects,
+            blocked: &blocked,
+            y_shift,
+            content_w,
+            content_h,
+            avail,
+            middle_gesture,
+            hand: app.quick_tool == QuickTool::Hand,
+        },
     );
     let ppp = ui.ctx().pixels_per_point();
     let scale = view.render_scale(ppp);
@@ -3003,7 +3019,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     view.move_background.prepare(ui.ctx(), doc, &view.content, scale);
 
-    scroll = refine_goto_point(scroll, view, &ScrollGeometry { rects: &rects, y_shift, content_w, content_h, avail, middle_gesture, hand });
+    scroll = refine_goto_point(
+        scroll,
+        view,
+        &ScrollGeometry { rects: &rects, blocked: &blocked, y_shift, content_w, content_h, avail, middle_gesture, hand },
+    );
     let selection_wheel = view.selection_drag && navigation_enabled && unobstructed && !single_paging && ui.rect_contains_pointer(avail);
     let env = PageEnv {
         added: &added,

@@ -52,6 +52,15 @@ pub(crate) struct PagePointer {
 }
 
 impl PagePointer {
+    /// The current press origin when it did not begin in excluded viewport chrome.
+    ///
+    /// The Hand tool reads this before the page widget is laid out for the current frame, while
+    /// egui still identifies the previous frame's page widget as the drag owner. Keeping the raw
+    /// pointer read here preserves the single page-pointer boundary.
+    pub(crate) fn unblocked_press_origin(ui: &egui::Ui, blocked: &[Rect]) -> Option<Pos2> {
+        ui.input(|i| i.pointer.press_origin()).filter(|origin| !blocked.iter().any(|rect| rect.contains(*origin)))
+    }
+
     /// The page pointer with gestures that begin in `blocked` retained as blocked through every
     /// egui pass of their release frame. A new frame clears the retained block.
     pub(crate) fn read_excluding(ui: &egui::Ui, resp: &egui::Response, modal: bool, blocked: &[Rect]) -> Self {
