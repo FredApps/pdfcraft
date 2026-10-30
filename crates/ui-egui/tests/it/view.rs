@@ -2098,7 +2098,7 @@ fn rulers_option_sets_an_idempotent_headless_state() {
 #[test]
 fn ruler_visibility_persists_and_legacy_settings_keep_rulers_hidden() {
     let mut app = PdfCraftApp::new();
-    app.show_rulers = true;
+    app.set_option("rulers", "on").unwrap();
     let saved = app.persist();
 
     let mut restored = PdfCraftApp::new();
