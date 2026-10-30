@@ -253,13 +253,16 @@ fn mentions_adobe(s: &str) -> bool {
 pub fn check(root: &Path, m: &Manifest, repo_files: &[String], lock: &BTreeSet<(String, String)>) -> Vec<String> {
     let mut problems = Vec::new();
     let mut seen = BTreeSet::new();
-    // Kinds that may never come from Adobe (AGENTS.md §1.1): visual design, and UI translations
+    // Kinds that may never come from Adobe (AGENTS.md §1.1): visual design, sample documents, and UI translations
     // (which must be clean-room, never taken from a product's string tables).
-    let visual = |kind: &str| matches!(kind, "icon" | "image" | "font" | "logo" | "cursor" | "video" | "translation");
+    let visual = |kind: &str| matches!(kind, "icon" | "image" | "font" | "logo" | "cursor" | "video" | "translation" | "document");
     // Typefaces under the SIL Open Font License are allowed whoever designed them (AGENTS.md §1.1).
     let ofl_font =
         |kind: &str, licence: &str| kind == "font" && licence_ids(licence).next().is_some() && licence_ids(licence).all(|id| id == "OFL-1.1");
     let licence_ok = |what: &str, licence: &str, problems: &mut Vec<String>| {
+        if licence_ids(licence).next().is_none() {
+            problems.push(format!("{what}: licence must contain at least one allowed identifier (AGENTS.md §1.2)"));
+        }
         for id in licence_ids(licence) {
             if !ALLOWED_LICENCES.contains(&id) {
                 problems.push(format!("{what}: licence `{id}` is not on the allowlist (AGENTS.md §1.2)"));
@@ -555,6 +558,44 @@ mod tests {
             };
             let problems = check(&root(), &m, &[], &lock(&[]));
             assert!(problems.iter().any(|p| p.contains(expected)), "{field}: {problems:?}");
+        }
+    }
+
+    #[test]
+    fn evidence_requires_a_licence_identifier() {
+        for licence in ["", " \t\n", "()", "OR AND WITH"] {
+            let mut m = evidence_manifest();
+            m.evidence[0].licence = licence.into();
+            let problems = check(&root(), &m, &[], &lock(&[]));
+            assert!(problems.iter().any(|p| p.contains("licence must contain")), "{licence:?}: {problems:?}");
+        }
+        for licence in ["MIT", "MIT OR Apache-2.0", "(MIT AND Apache-2.0)"] {
+            let mut m = evidence_manifest();
+            m.evidence[0].licence = licence.into();
+            assert!(check(&root(), &m, &[], &lock(&[])).is_empty(), "{licence}");
+        }
+    }
+
+    #[test]
+    fn document_evidence_rejects_adobe_provenance() {
+        for field in ["none", "author", "source", "title"] {
+            let mut m = evidence_manifest();
+            let e = &mut m.evidence[0];
+            e.kind = "document".into();
+            e.file = "synthetic.pdf".into();
+            e.url = "https://example.org/synthetic.pdf".into();
+            match field {
+                "author" => e.author = "Adobe".into(),
+                "source" => e.source = "https://adobe.com/sample".into(),
+                "title" => e.title = "Adobe sample document".into(),
+                _ => {}
+            }
+            let problems = check(&root(), &m, &[], &lock(&[]));
+            if field == "none" {
+                assert!(problems.is_empty(), "{problems:?}");
+                continue;
+            }
+            assert!(problems.iter().any(|p| p.contains("document from Adobe is forbidden")), "{field}: {problems:?}");
         }
     }
 
