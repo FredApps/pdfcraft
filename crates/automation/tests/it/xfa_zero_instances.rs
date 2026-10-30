@@ -47,3 +47,42 @@ fn zero_instances_tools_render_fill_undo_save_and_reopen() {
     tool(&mut a, "js_run", json!({"doc":reopened,"field":"add","script":""}));
     assert_eq!(rows(&mut a, reopened), 1);
 }
+
+/// #4744 through the CLI/MCP table: a script writes one initial row without losing its sibling;
+/// explicitly removing both rows stays removed on save/reopen.
+#[test]
+fn initial_instances_survive_script_edits_and_explicit_removal_through_tools() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    let xml = pdfcraft_xfa::fixtures::optional_rows(2)
+        .replace("<value><text>default</text></value>", "")
+        .replace(
+            "<field name=\"other\" w=\"200pt\" h=\"20pt\"><ui><textEdit/></ui></field>",
+            r#"<field name="other" w="200pt" h="20pt"><ui><textEdit/></ui>
+            <event activity="initialize"><script contentType="application/x-javascript">var first = xfa.resolveNode("form.row[0].entry"); if (first) first.rawValue = "first";</script></event></field>"#,
+        );
+    std::fs::write(dir.join("initial.pdf"), pdfcraft_xfa::fixtures::shell(&xml)).unwrap();
+    let mut a = Automation::new().with_root(dir).unwrap().with_clock(|| 1_700_000_000);
+    let rows = |a: &mut Automation, id| {
+        tool(a, "form_fields", json!({"doc":id}))["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["name"].as_str().is_some_and(|name| name.starts_with("entry")))
+            .count()
+    };
+    let id = tool(&mut a, "doc_open", json!({"path":"initial.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(rows(&mut a, id), 2);
+    tool(&mut a, "form_fill", json!({"doc":id,"values":{"other":"unrelated"}}));
+    assert_eq!(rows(&mut a, id), 2);
+    tool(&mut a, "doc_save", json!({"doc":id,"path":"initial-saved.pdf"}));
+    let reopened = tool(&mut a, "doc_open", json!({"path":"initial-saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(rows(&mut a, reopened), 2);
+    for expected in [1, 0] {
+        tool(&mut a, "js_run", json!({"doc":reopened,"field":"remove","script":""}));
+        assert_eq!(rows(&mut a, reopened), expected);
+    }
+    tool(&mut a, "doc_save", json!({"doc":reopened,"path":"removed.pdf"}));
+    let removed = tool(&mut a, "doc_open", json!({"path":"removed.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(rows(&mut a, removed), 0);
+}

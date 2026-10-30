@@ -395,3 +395,125 @@ fn unnamed_subforms_keep_initial_instances_in_layout_and_runtime() {
         assert_eq!(widgets(&form).len(), initial);
     }
 }
+
+/// A partial data document cannot reduce a repeating subform below its required minimum (#4744).
+#[test]
+fn data_with_fewer_groups_than_occur_min_still_gives_min_instances() {
+    let body = r#"<subform name="rep" layout="tb"><occur min="2" max="2"/>
+        <field name="k" w="100pt" h="20pt"><ui><textEdit/></ui></field>
+    </subform>"#;
+    let form = render(body, Some("<form><rep><k>first</k></rep></form>"));
+    let fields = widgets(&form);
+    assert_eq!(fields.len(), 2);
+    assert!(fields[0].som.ends_with("rep[0].k[0]"));
+    assert!(fields[1].som.ends_with("rep[1].k[0]"));
+    assert!((fields[1].rect.y - fields[0].rect.y - 20.0).abs() < 0.01);
+}
+
+/// Initial data groups retain empty descendants through transparent areas and unnamed wrappers,
+/// and survive an ordinary PDF save/reopen without manufacturing data for the wrappers.
+#[test]
+fn initial_empty_groups_below_areas_and_unnamed_wrappers_survive_reopen() {
+    use std::sync::Arc;
+
+    use pdfcraft_cos::{Document, SaveOptions, write_incremental};
+
+    let xdp = r#"<template><subform name="form" layout="tb">
+        <area name="panel"><subform layout="tb">
+            <subform name="outer" layout="tb"><occur min="0" initial="2" max="3"/>
+                <subform name="empty"><occur min="0" initial="2" max="3"/></subform>
+                <subform name="absent"><occur min="0" initial="0" max="1"/></subform>
+                <field name="k" w="100pt" h="20pt"><ui><textEdit/></ui></field>
+            </subform>
+        </subform></area>
+    </subform></template>"#;
+    let mut doc = Document::open(Arc::new(crate::fixtures::shell(xdp))).unwrap();
+    crate::render_into(&mut doc).unwrap();
+    let bytes = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let reopened = Document::open(Arc::new(bytes)).unwrap();
+    for document in [&doc, &reopened] {
+        let data = crate::data_of(document).expect("the blank merge records initially created groups");
+        let root = vec![("form".to_string(), 0)];
+        assert_eq!(data.count(&root, "panel"), 0, "an area does not establish a data scope");
+        assert_eq!(data.count(&root, "#subform"), 0);
+        assert_eq!(data.count(&root, "outer"), 2);
+        for i in 0..2 {
+            let parent = vec![("form".to_string(), 0), ("outer".to_string(), i)];
+            assert_eq!(data.count(&parent, "empty"), 2, "empty descendants still represent instances");
+            assert_eq!(data.count(&parent, "absent"), 0);
+        }
+        let (tpl, _) = parse(xdp).unwrap();
+        let form = layout(&tpl, Some(&data)).unwrap();
+        assert_eq!(widgets(&form).len(), 2, "materializing data must preserve the blank layout");
+    }
+}
+
+/// Recording body groups must not turn initially present master-page subforms into absent ones.
+/// Master-page SOM scopes follow the runtime's existing mapping outside the body root.
+#[test]
+fn initial_groups_in_named_and_unnamed_page_master_scopes_are_preserved() {
+    use std::sync::Arc;
+
+    use pdfcraft_cos::Document;
+
+    for area_name in ["", " name=\"master\""] {
+        let xdp = format!(
+            r#"<template><subform name="form" layout="tb">
+                <pageSet><pageArea{area_name}>
+                    <medium short="612pt" long="792pt"/>
+                    <contentArea x="36pt" y="100pt" w="540pt" h="650pt"/>
+                    <area name="header"><subform name="rep" layout="tb">
+                        <occur min="0" initial="2" max="3"/>
+                        <field name="k" w="100pt" h="20pt"><ui><textEdit/></ui></field>
+                    </subform></area>
+                </pageArea></pageSet>
+                <field name="body" w="100pt" h="20pt"><ui><textEdit/></ui></field>
+            </subform></template>"#
+        );
+        let mut doc = Document::open(Arc::new(crate::fixtures::shell(&xdp))).unwrap();
+        crate::render_into(&mut doc).unwrap();
+        let data = crate::data_of(&doc).expect("the blank merge preserves master-page groups as well as body groups");
+        let parent = if area_name.is_empty() { vec![("header".to_string(), 0)] } else { vec![("master".to_string(), 0), ("header".to_string(), 0)] };
+        assert_eq!(data.count(&parent, "rep"), 2, "master scope: {area_name:?}");
+        let (tpl, _) = parse(&xdp).unwrap();
+        let live = crate::form_tree(&tpl, Some(&data), &crate::Overrides::default());
+        let master = live.root.children.iter().find(|n| n.name == if area_name.is_empty() { "#pageArea" } else { "master" }).unwrap();
+        let header = master.children.iter().find(|n| n.name == "header").unwrap();
+        assert_eq!(header.children.iter().filter(|n| n.name == "rep").count(), 2, "script snapshots retain master-page instances");
+    }
+}
+
+/// An unnamed body root leaves named area segments in the existing resolver's data paths.
+#[test]
+fn initial_groups_below_an_unnamed_root_use_the_runtime_data_scope() {
+    use std::sync::Arc;
+
+    use pdfcraft_cos::{Document, SaveOptions, write_incremental};
+
+    let xml = r#"<template><subform layout="tb">
+        <area name="panel"><subform layout="tb">
+            <subform name="outer" layout="tb"><occur min="0" initial="2" max="3"/>
+                <area name="inside"><subform name="empty"><occur min="0" initial="2" max="3"/></subform></area>
+                <field name="k" w="100pt" h="20pt"><ui><textEdit/></ui></field>
+            </subform>
+        </subform></area>
+    </subform></template>"#;
+    let mut doc = Document::open(Arc::new(crate::fixtures::shell(xml))).unwrap();
+    crate::render_into(&mut doc).unwrap();
+    let reopened = Document::open(Arc::new(write_incremental(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    let (tpl, _) = parse(xml).unwrap();
+    for document in [&doc, &reopened] {
+        let data = crate::data_of(document).unwrap();
+        let panel = crate::data_path(&tpl, "panel[0]");
+        assert_eq!(data.count(&panel, "outer"), 2);
+        for i in 0..2 {
+            let parent = crate::data_path(&tpl, &format!("panel[0].outer[{i}].inside[0]"));
+            assert_eq!(data.count(&parent, "empty"), 2);
+        }
+        assert_eq!(widgets(&layout(&tpl, Some(&data)).unwrap()).len(), 2);
+        let live = crate::form_tree(&tpl, Some(&data), &Default::default());
+        let panel = live.root.children.iter().find(|n| n.name == "panel").unwrap();
+        let unnamed = panel.children.first().unwrap();
+        assert_eq!(unnamed.children.iter().filter(|n| n.name == "outer").count(), 2);
+    }
+}
