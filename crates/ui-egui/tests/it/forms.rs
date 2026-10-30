@@ -1186,9 +1186,13 @@ fn overlay_clears_after_fresh_tiles_zoom_then_edit_and_rejected_edit() {
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
 
-    // 3. Zoom then edit: zoom to another scale, let tiles settle, then edit.
+    // 3. Zoom then edit: start from the 100% wheel stop, zoom to 150%, let the new layout and
+    // tiles settle, then reacquire the field from its current screen transform before clicking.
+    h.state_mut().set_option("zoom", "100").unwrap();
+    crate::support::settle(&mut h);
     h.state_mut().views[0].zoom_step(true);
     crate::support::settle(&mut h);
+    assert_eq!(h.state().views[0].zoom, 1.5);
     click_field(&mut h, "name", 0);
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     h.event(egui::Event::Text("ZoomedVal".into()));
