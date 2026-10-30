@@ -990,6 +990,29 @@ fn a_cleared_image_group_4_wouldnt_shrink_stays_flate() {
     }
 }
 
+/// Only one bit of one component goes to Group 4 or JBIG2. An 8-bit grey image here starts as white
+/// as a bilevel scan and goes on as noise Flate can't shrink, so Group 4, which would read only the
+/// first rows' worth of bytes, would look far smaller while losing the picture.
+#[test]
+fn a_cleared_image_of_more_than_one_bit_stays_flate() {
+    let (w, h) = (256usize, 256usize);
+    let mut data = vec![0xFF; w * h];
+    let mut state = 0x1234_5678u32;
+    for b in data.iter_mut().skip(w * h / 8) {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        *b = state.to_le_bytes()[0];
+    }
+    let dict = format!("/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter /FlateDecode");
+    let mut doc = one_page(b"q 200 0 0 20 0 100 cm /Im Do Q", "/XObject << /Im 7 0 R >>", vec![stream(&dict, pdfcraft_filters::encode_flate(&data))]);
+    mark(&mut doc, 0, &[[0.0, 112.0, 99.0, 118.0]], "");
+    assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1);
+    let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert_eq!(named_stream(&saved, 0, b"PCRedacted1").unwrap().dict.name(b"Filter"), Some(&b"FlateDecode"[..]));
+    assert_eq!(named_image(&saved, 0, b"PCRedacted1").unwrap().get(h * w / 2..), data.get(h * w / 2..), "the rows below the mark are kept");
+}
+
 /// Apply Redactions gives the page its own pruned /Resources, but the dictionary it drew through
 /// before (inherited from the /Pages node, or shared with another page) still named the removed
 /// image and form, so a full-rewrite save kept them.
