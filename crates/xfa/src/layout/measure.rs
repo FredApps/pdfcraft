@@ -159,6 +159,7 @@ impl Layouter<'_> {
         let Some(cap) = f.caption.as_ref().filter(|c| c.presence.occupies() && c.placement != Placement::Inline) else {
             return check;
         };
+        // The 2pt matches `caption_reserve`'s room for a caption without a reserve.
         let text = || self.natural_width(&cap.value, &ctx.font.apply(&cap.font), &ctx.para.apply(&cap.para)).map_or(0.0, |t| t + 2.0);
         match cap.placement {
             Placement::Top | Placement::Bottom => check.max(text()),

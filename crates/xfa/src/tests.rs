@@ -3015,9 +3015,32 @@ fn a_radio_choice_without_a_width_is_as_wide_as_its_content() {
     let laid = widgets(&form.pages[0]);
     let x = |name: &str| laid.iter().find(|w| w.name == name).map(|w| w.rect.x - 36.0).unwrap_or_else(|| panic!("no radio button {name}"));
     let mm = 72.0 / 25.4;
-    // Each box sits at the right end of its own 20.32mm-wide choice.
+    // A negative reserve (as Designer writes) sizes the caption to its text, so content is
+    // narrower than minW and each box sits at the right end of its own 20.32mm-wide choice.
     assert!((x("Yes") - (20.32 * mm - 10.0)).abs() < 0.01, "Yes box at {} pt", x("Yes"));
     assert!((x("No") - ((20.308 + 20.32) * mm - 10.0)).abs() < 0.01, "No box at {} pt", x("No"));
+}
+
+/// Without a width or minW, a check box is exactly its caption's reserve plus its box, whether
+/// placed (its right-aligned box ends there) or flowed (two fit side by side in an lr-tb row).
+#[test]
+fn a_check_box_without_a_width_is_its_caption_and_box() {
+    let check = |name: &str, at: &str| {
+        format!(
+            r#"<field name="{name}" {at} h="0.25in"><ui><checkButton size="10pt"/></ui><caption reserve="0.5in"><value><text>{name}</text></value></caption><para hAlign="right"/><items><integer>1</integer><integer>0</integer></items></field>"#
+        )
+    };
+    let box_at = |body: String, name: &str| {
+        let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+        widgets(&form.pages[0]).iter().find(|w| w.name == name).map(|w| (w.rect.x - 36.0, w.rect.y - 36.0)).unwrap()
+    };
+    let placed = format!(r#"<subform name="body" layout="position" w="7.5in" h="1in">{}</subform>"#, check("placed", r#"x="0in" y="0in""#));
+    let (x, _) = box_at(placed, "placed");
+    assert!((x - 36.0).abs() < 0.01, "the box ends the 46pt field, after the 36pt caption: {x}");
+
+    let flowed = format!(r#"<subform name="body" layout="lr-tb" w="3in">{}{}</subform>"#, check("first", ""), check("second", ""));
+    let (x, y) = box_at(flowed, "second");
+    assert!((x - 82.0).abs() < 0.01 && y.abs() < 0.01, "the second check box follows the first on its row: ({x}, {y})");
 }
 
 /// A caption without a reserve leaves room for the box at the size it is drawn, a box larger than
