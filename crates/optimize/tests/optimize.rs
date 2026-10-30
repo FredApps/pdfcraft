@@ -3504,6 +3504,41 @@ fn indexed_thin_rules_survive_averaging_for_both_palette_orders_and_decodes() {
     }
 }
 
+/// An indexed image also drawn where the optimizer doesn't read (an annotation's appearance, where
+/// other default colour spaces may be in force and change which palette entry is darker) keeps its
+/// resolution, as black-and-white RGB keeps its colour space; drawn only on the page, it is
+/// averaged. A grey image is averaged either way: sample 0 stays dark in a grey space, and only an
+/// indexed image's palette depends on what's in force where it is drawn.
+#[test]
+fn an_indexed_image_used_beyond_the_page_content_read_is_not_averaged() {
+    let (w, h) = (1200u32, 480u32);
+    let stride = (w as usize).div_ceil(8);
+    let mut data = vec![0xFF; stride * h as usize];
+    for y in 0..h as usize {
+        data[y * stride + 101 / 8] &= !(0x80 >> (101 % 8));
+    }
+    let palette = Object::String(pdfcraft_cos::PdfString::literal(vec![0, 0, 0, 255, 255, 255]));
+    let indexed = Object::Array(vec![Object::name("Indexed"), Object::name("DeviceRGB"), 1.into(), palette]);
+    let cases = [(&indexed, false, 600), (&indexed, true, 1200), (&Object::name("DeviceGray"), false, 600), (&Object::name("DeviceGray"), true, 600)];
+    for (cs, in_annotation, width) in cases {
+        let mut doc = Document::new_empty();
+        let image = mono_image(&mut doc, w, h, &data, None, &[("BitsPerComponent", 1.into()), ("ColorSpace", cs.clone())]);
+        // 144 × 57.6 pt is 600 ppi.
+        let p = page(&mut doc, &[("Im", image)], "q 144 0 0 57.6 20 600 cm /Im Do Q");
+        if in_annotation {
+            let resources = Object::Dict({
+                let mut r = Dict::new();
+                r.set(b"XObject".to_vec(), Object::Dict(xobject_dict(&[("Im", image)])));
+                r
+            });
+            let appearance = drawing(&mut doc, Some(resources), &form_entries());
+            annotate(&mut doc, p, appearance);
+        }
+        optimize(&mut doc, &Settings::default()).unwrap();
+        assert_eq!(stream(&doc, image).dict.int(b"Width"), Some(width), "{cs:?}, in an annotation: {in_annotation}");
+    }
+}
+
 /// White margins must not hide a small screened photograph from the tone guard.
 #[test]
 fn mixed_text_and_small_halftone_regions_keep_their_tones_with_wide_white_margins() {

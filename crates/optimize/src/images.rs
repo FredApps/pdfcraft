@@ -300,6 +300,14 @@ fn device_rgb(doc: &Document, r: ObjRef) -> bool {
         && cs.as_deref().and_then(Object::as_name).is_some_and(|n| matches!(n, b"DeviceRGB" | b"RGB"))
 }
 
+/// Whether image `r` is indexed: its palette says which of its samples is dark ([`dark_is_one`]),
+/// which default colour spaces in force where it is drawn may change.
+fn indexed(doc: &Document, r: ObjRef) -> bool {
+    let Object::Stream(s) = &*doc.get(r) else { return false };
+    let cs = s.dict.get(b"ColorSpace").map(|cs| doc.resolve(cs));
+    matches!(cs.as_deref(), Some(Object::Array(a)) if matches!(a.first().and_then(Object::as_name), Some(b"Indexed" | b"I")))
+}
+
 /// Call `f` with every reference in `o`, a dictionary's or array's included, a stream's dictionary
 /// too, but not those in objects referred to.
 fn each_ref(o: &Object, mut f: impl FnMut(ObjRef)) {
@@ -1144,11 +1152,13 @@ pub(crate) fn run(
     progress: &mut dyn FnMut(Stage) -> bool,
 ) -> Result<(), OptimizeError> {
     let (ppi, mut defaults, read) = walk_pages(doc, pages);
-    // Black-and-white RGB becomes grey, which default colour spaces would draw otherwise: one used
-    // where the walk didn't look may be drawn so.
+    // Black-and-white RGB becomes grey, which default colour spaces would draw otherwise, and an
+    // indexed image's palette says which of its samples a resampled one keeps, which they may
+    // change: one used where the walk didn't look may be drawn so.
     let packs = settings.mono.compression != MonoCompression::Retain;
-    let rgb: HashSet<u32> = ppi.keys().filter(|r| packs && device_rgb(doc, **r)).map(|r| r.num).collect();
-    defaults.extend(used_elsewhere(doc, &rgb, &read));
+    let checked: HashSet<u32> =
+        ppi.keys().filter(|r| (packs && device_rgb(doc, **r)) || (settings.mono.downsample && indexed(doc, **r))).map(|r| r.num).collect();
+    defaults.extend(used_elsewhere(doc, &checked, &read));
     // Soft masks are processed with their image, not on their own.
     let masks: HashSet<ObjRef> = ppi
         .keys()
