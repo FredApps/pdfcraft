@@ -388,3 +388,39 @@ fn a_shared_name_is_the_month_when_the_weekday_is_left_out() {
     use_form_date_language("en");
     assert!(bad.is_empty(), "{}", bad.join("; "));
 }
+
+/// Turkish names typed in capitals are read: lower-casing letter by letter made "MAYIS" "mayis"
+/// (not "mayıs"), "SALI" "sali" and "EKİM" "eki̇m" (an i with a dot above), so no name matched.
+/// Dotted, dotless and capital i are one letter when names are read (#5303).
+#[test]
+fn turkish_names_typed_in_capitals_are_read() {
+    let _names = names_lock();
+    use_form_date_language("tr");
+    let mut bad = Vec::new();
+    for (fmt, text, want) in [
+        ("d mmmm yyyy", "1 MAYIS 2026", (2026, 5, 1)),
+        ("d mmmm yyyy", "1 EKİM 2026", (2026, 10, 1)),
+        ("d mmmm yyyy", "1 Ekim 2026", (2026, 10, 1)),
+        ("d mmm yyyy", "1 EKİ 2026", (2026, 10, 1)),
+        ("dddd d mmmm yyyy", "SALI 6 OCAK 2026", (2026, 1, 6)),
+        ("dddd d mmmm yyyy", "Salı 6 Ocak 2026", (2026, 1, 6)),
+    ] {
+        let read = parse_date(text, fmt).map(|d| (d.y, d.m, d.d));
+        if read != Some(want) {
+            bad.push(format!("forms {fmt}: {text:?} -> {read:?}"));
+        }
+        let (y, m, d) = want;
+        let got = scanned(fmt, text);
+        if got != format!("{y:04}-{m:02}-{d:02}") {
+            bad.push(format!("scand {fmt}: {text:?} -> {got}"));
+        }
+    }
+    // English is read as before, capitals and all.
+    use_form_date_language("en");
+    for (fmt, text) in [("d mmmm yyyy", "1 APRIL 2026"), ("dddd d mmmm yyyy", "FRIDAY 1 MAY 2026"), ("d mmm yyyy", "1 MAY 2026")] {
+        if parse_date(text, fmt).is_none() || scanned(fmt, text) == "null" {
+            bad.push(format!("en {fmt}: {text:?}"));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("; "));
+}

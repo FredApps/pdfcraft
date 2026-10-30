@@ -169,9 +169,8 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
         return text.to_string();
     }
     let chars: Vec<char> = text.chars().collect();
-    let lower = |c: char| c.to_lowercase().collect::<String>();
     let typed_english: [&[&str]; 4] = [&ENGLISH.0, &ENGLISH.1, &ENGLISH.2, &ENGLISH.3];
-    // Each name as lower-case chars, whether it is a month, and its English name.
+    // Each name as folded chars, whether it is a month, and its English name.
     let mut names: Vec<(Vec<String>, bool, &str)> = Vec::new();
     for (k, (list, en)) in lists.into_iter().zip(EN).chain(typed_english.into_iter().zip(EN)).enumerate() {
         for (name, english) in list.iter().zip(en.iter()) {
@@ -179,7 +178,7 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
             // kind of name, so that where it equals another ("Mar", March) the format decides.
             let bare = name.trim_end_matches('.');
             for name in std::iter::once(*name).chain((bare.len() < name.len()).then_some(bare)) {
-                let n: Vec<String> = name.chars().map(lower).collect();
+                let n: Vec<String> = name.chars().map(fold).collect();
                 if !n.is_empty() && n.len() <= MAX_NAME_CHARS {
                     names.push((n, k % 4 < 2, english));
                 }
@@ -209,7 +208,7 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
             let end = i.saturating_add(n.len());
             let first = n.first().and_then(|e| e.chars().next());
             let last = n.last().and_then(|e| e.chars().next());
-            chars.get(i..end).is_some_and(|t| t.iter().map(|c| lower(*c)).eq(n.iter().cloned()))
+            chars.get(i..end).is_some_and(|t| t.iter().map(|c| fold(*c)).eq(n.iter().cloned()))
                 && !(first.is_some_and(char::is_alphabetic) && letter(i.checked_sub(1).and_then(|p| chars.get(p))))
                 && !match last {
                     Some(l) if l.is_ascii_digit() => chars.get(end).is_some_and(char::is_ascii_digit),
@@ -246,6 +245,22 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
         }
     }
     out
+}
+
+/// `c` as names are compared: lower case, with the capital I and the Turkish dotted and dotless
+/// i all "i", and a combining dot above (U+0307) dropped, so that "EKİM", "SALI" and "MAYIS" are
+/// Turkish "Ekim", "Salı" and "Mayıs", which lower-casing alone makes "ekim" with a dotted i,
+/// "sali" and "mayis" (#5303). One piece for each char, so positions in the text stay aligned.
+fn fold(c: char) -> String {
+    match c {
+        'I' | 'ı' | 'İ' => "i".to_string(),
+        _ => c.to_lowercase().filter(|&l| l != '\u{307}').collect(),
+    }
+}
+
+/// `s` [`fold`]ed char by char.
+fn folded(s: &str) -> String {
+    s.chars().map(fold).collect()
 }
 
 /// Typed dates longer than this are not searched for names.
@@ -665,9 +680,9 @@ fn scan_date(fmt: &str, text: &str, this_year: i32) -> Option<Scanned> {
 
 /// The index of the name `word` is, in full or as its first three letters, in any case.
 fn named(names: &[&str], word: &str) -> Option<u32> {
-    let word = word.to_lowercase();
+    let word = folded(word);
     let i = names.iter().position(|n| {
-        let n = n.to_lowercase();
+        let n = folded(n);
         // A short name may end in a dot ("Okt."); three letters may be cut from any name.
         word == n || word == n.trim_end_matches('.') || n.chars().take(3).collect::<String>() == word
     })?;
