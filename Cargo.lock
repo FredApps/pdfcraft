@@ -4395,6 +4395,7 @@ dependencies = [
  "pdfcraft-create",
  "pdfcraft-edit",
  "pdfcraft-export",
+ "pdfcraft-filters",
  "pdfcraft-fonts",
  "pdfcraft-forms",
  "pdfcraft-geom",
