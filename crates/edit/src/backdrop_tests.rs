@@ -497,7 +497,7 @@ fn the_backdrop_copy_keeps_the_original_dictionary_less_its_old_encoding() {
 }
 
 #[test]
-fn a_stream_listed_twice_is_replaced_in_both_slots_and_restored_in_both() {
+fn a_stream_listed_twice_is_left_untouched_as_ambiguous() {
     let mut doc = build(&[
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
@@ -508,7 +508,7 @@ fn a_stream_listed_twice_is_replaced_in_both_slots_and_restored_in_both() {
     add_background(&mut doc, &[0], &red(), false).unwrap();
     let s = streams(&doc);
     assert_eq!(s.len(), 3, "{s:?}");
-    assert!(s[1..].iter().all(|c| c.contains("re n") && !c.contains("re f")), "no slot still paints the white fill: {s:?}");
+    assert_eq!(s[1..], original[..], "repeated executions are not qualified independently");
     remove_marks(&mut doc, &[0], MarkKind::Background).unwrap();
     assert_eq!(streams(&doc), original);
 }
@@ -568,4 +568,40 @@ fn an_undecodable_stream_before_a_white_fill_keeps_the_backdrop_unknown() {
     ];
     let doc = build(&objs);
     assert_eq!(page_backdrop(&doc, 0).unwrap(), None, "unknown earlier paint must not be treated as an empty stream");
+}
+
+#[test]
+fn shared_fill_used_as_later_artwork_is_not_rewritten() {
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 200] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents [4 0 R 5 0 R 6 0 R 5 0 R 7 0 R] >>".into(),
+        stream("", "1 g"),
+        stream("", "0 0 300 200 re f"),
+        stream("", "q 0 g 0.25 0 0 0.25 20 20 cm"),
+        stream("", "Q"),
+    ]);
+    assert_eq!(page_backdrop(&doc, 0).unwrap(), None);
+    let original = streams(&doc);
+    add_background(&mut doc, &[0], &red(), false).unwrap();
+    assert_eq!(streams(&doc)[1..], original[..], "the later black artwork keeps its fill");
+    let mut saved = reopen(&doc);
+    assert_eq!(streams(&saved)[1..], original[..]);
+    remove_marks(&mut saved, &[0], MarkKind::Background).unwrap();
+    assert_eq!(streams(&saved), original);
+    assert_eq!(streams(&reopen(&saved)), original);
+}
+
+#[test]
+fn compressed_backdrop_content_is_refused_before_expanding_past_the_scan_budget() {
+    let mut doc = page(&["1 g 0 0 300 200 re f"]);
+    let mut bytes = b"1 g 0 0 300 200 re f\n".to_vec();
+    bytes.resize(2 * 1024 * 1024, b' ');
+    let source = doc.add(Object::Stream(Stream::flate(Dict::new(), &bytes)));
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    doc.update_dict(page, |d| d.set(b"Contents".to_vec(), Object::Ref(source))).unwrap();
+    assert_eq!(page_backdrop(&doc, 0).unwrap(), None);
+    add_background(&mut doc, &[0], &red(), false).unwrap();
+    let Object::Stream(unchanged) = &*doc.get(source) else { panic!("stream") };
+    assert_eq!(unchanged.decoded_strict().unwrap(), bytes, "refusal preserves the source");
 }
