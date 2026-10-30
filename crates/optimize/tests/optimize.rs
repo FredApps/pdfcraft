@@ -3608,6 +3608,33 @@ fn an_indexed_image_used_beyond_the_page_content_read_is_not_averaged() {
     }
 }
 
+/// Which palette entry is darker comes from the colours, weighted as luma, and blue is darker than
+/// red whichever comes first. An array shaped like an indexed colour space and named otherwise has
+/// no palette, so its samples aren't averaged.
+#[test]
+fn an_indexed_palette_is_read_by_the_luma_of_its_colours() {
+    let (w, h) = (1200u32, 480u32);
+    let stride = (w as usize).div_ceil(8);
+    let mut data = vec![0xFF; stride * h as usize];
+    for y in 0..h as usize {
+        data[y * stride + 101 / 8] &= !(0x80 >> (101 % 8));
+    }
+    let palette = Object::String(pdfcraft_cos::PdfString::literal(vec![0, 0, 255, 255, 0, 0]));
+    let optimized = |space: &str| {
+        let cs = Object::Array(vec![Object::name(space), Object::name("DeviceRGB"), 1.into(), palette.clone()]);
+        let mut doc = Document::new_empty();
+        let image = mono_image(&mut doc, w, h, &data, None, &[("BitsPerComponent", 1.into()), ("ColorSpace", cs)]);
+        page(&mut doc, &[("Im", image)], "q 144 0 0 57.6 20 600 cm /Im Do Q");
+        optimize(&mut doc, &Settings::default()).unwrap();
+        let s = stream(&doc, image);
+        (s.dict.int(b"Width"), doc.decoded_image(&s).unwrap())
+    };
+    let (width, samples) = optimized("Indexed");
+    assert_eq!(width, Some(600));
+    assert!(samples.iter().any(|b| *b != 0xFF), "the blue line, half a new pixel wide, stays as the dark sample");
+    assert_eq!(optimized("NotIndexed").0, Some(1200));
+}
+
 /// White margins must not hide a small screened photograph from the tone guard.
 #[test]
 fn mixed_text_and_small_halftone_regions_keep_their_tones_with_wide_white_margins() {
