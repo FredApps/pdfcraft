@@ -880,10 +880,14 @@ fn default_zoom_is_used_for_new_documents() {
     let asks = String::from_utf8_lossy(PAGES).replace("/Pages 2 0 R >>", "/Pages 2 0 R /OpenAction [3 0 R /Fit] >>");
     h.state_mut().open_bytes("asks.pdf", None, asks.into_bytes()).expect("opens");
     assert_eq!(h.state().views[3].fit, Fit::Page);
-    // Typos and zooms the view can't show are refused.
-    for bad in ["huge", "fit-height", "5", "9000%"] {
+    // The supported range includes its 1% lower bound; smaller, excessive and malformed values
+    // are refused.
+    h.state_mut().set_option("default-zoom", "1").unwrap();
+    assert_eq!(h.state().view_defaults.zoom, 0.01);
+    for bad in ["huge", "fit-height", "0", "0.5", "9000%"] {
         assert!(h.state_mut().set_option("default-zoom", bad).is_err(), "{bad}");
     }
+    h.state_mut().set_option("default-zoom", "150%").unwrap();
     // Saved settings keep it, and garbage leaves it alone.
     let saved = h.state().persist();
     let mut fresh = PdfCraftApp::new();
