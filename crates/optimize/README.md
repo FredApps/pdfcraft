@@ -31,7 +31,7 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
   stored as JPEG (Acrobat's quality steps) or ZIP; soft masks are resampled with their image.
   An image is replaced only if the result is smaller. Left alone by these colour and grey
   settings: CMYK and other colour spaces, image masks, decode arrays, more than 8 bits, JPEG 2000,
-  JBIG2 and CCITT (black-and-white images, CCITT among them, are below). A JPEG is read with
+  JBIG2 and CCITT (black-and-white images, CCITT and JBIG2 among them, are below). A JPEG is read with
   its colour transform (an Adobe marker's, else `/ColorTransform`, ISO 32000-2 §7.4.8), so one
   stored untransformed keeps its colours; one whose marker and `/ColorTransform` disagree is left
   alone, since readers differ on which wins. Samples are read with `/DecodeParms` given by
@@ -40,7 +40,7 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
 - **Monochrome images** (`Settings::mono`, `MonoSettings::REDUCE` by default: to 300 ppi above
   450 ppi, CCITT Group 4). Black-and-white images are a 1-bit image with one colour component
   (grey, indexed, a separation) or an image mask, stored with no filter, with general-purpose ones
-  or with CCITT fax after any of those (decoded by `Document::decoded_image_within`, no further
+  or with CCITT fax or JBIG2 after any of those (decoded by `Document::decoded_image_within`, no further
   than its rows can need; byte-aligned Group 3 with end-of-line codes but none before the first
   row, not as T.4 sends them, is read as PdfCraft draws it, which at `/K 0` may be other rows than
   were coded, and an image stored again keeps them). Packed to one bit first, unless a colour-key `/Mask` is in the image's
@@ -80,21 +80,25 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
     Group 3, or Group 4 inside another filter such as `ASCII85Decode`, is stored again as Group 4
     alone when that is smaller. Damaged Group 3 with end-of-line codes is stored as the decoder
     recovers it, a bad row picked up again at the next code, as it reports no damage there; without
-    them, damage stops the decoding and the image is left alone. With Retain, a resampled image
-    keeps its kind of compression (CCITT, or Flate) and nothing else changes; an image of more bits
-    is then left to the grey or colour settings. Every change is kept only when it is smaller as
-    stored.
+    them, damage stops the decoding and the image is left alone. JBIG2, alone or inside another
+    filter, is stored again as the compression asks when that is smaller (as JBIG2 symbols where
+    its own coding is a generic region, say); a symbol-coded scan, averaged, loses its exact
+    repeats and often comes out larger, and then stays as it is. A JBIG2 image stored again refers to no
+    `/JBIG2Globals`, and one whose page isn't its size (PdfCraft's
+    renderer draws the whole page into the image) is left alone. With Retain, a resampled image
+    keeps its kind of compression (CCITT, JBIG2, or Flate) and nothing else changes; an image of
+    more bits is then left to the grey or colour settings. Every change is kept only when it is
+    smaller as stored.
   - Apart from the downsampling it is lossless: the samples keep their meaning, so the colour
     space, decode array and `/Mask` stay, but for packed RGB, which becomes grey with one decode
     pair. Group 4 wins on scans, whose ragged edges defeat Flate; on clean computer-drawn 1-bit
-    art Flate can be smaller. Not yet: JBIG2 images themselves (left as they are, neither
-    downsampled nor stored again, though `Document::decoded_image` reads them), inline images, an image's own `/SMask` or `/Mask`
+    art Flate can be smaller. Not yet: inline images, an image's own `/SMask` or `/Mask`
     image (only images drawn on a page are visited), and Group 4 for rows wider than 32,767
     samples.
 
   - Lossless JBIG2 uses bounded generic-region encoding or exact-copy symbol dictionaries when
-    smaller. No lossy symbol substitution is used. Export reads embedded images and bounded
-    shared globals.
+    smaller. No lossy symbol substitution is used. Export, redaction and this step read JBIG2
+    images, with bounded shared globals.
 - **Discard objects:** thumbnails, alternate images, document tags, print settings.
 - **Clean up:** Flate for streams with no filter; for streams with an outer ASCII85 or ASCIIHex
   layer, that layer is removed when the result is smaller (the inner filters keep their encoded

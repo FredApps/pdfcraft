@@ -2044,12 +2044,16 @@ fn rendered_text_becomes_jbig2_symbols() {
     assert!(render(&doc) == before, "the page looks the same");
 }
 
-/// A JBIG2 image is left as it is above 450 ppi, whatever the compression asked for, and so is one
-/// behind another filter: `Document::decoded_image` reads JBIG2, but the monochrome step doesn't
-/// take it yet (a resampled one would come out Flate under Retain). The same picture stored with
-/// Flate is averaged down under each, so it is the JBIG2 that stops it.
+/// A JBIG2 scan goes through Monochrome Images like any black-and-white image. Above 450 ppi it
+/// is averaged as its Flate copy is, to the same samples, and stored as each compression asks:
+/// Group 4 or JBIG2, or Flate when that is smaller, or under Retain JBIG2 again; alone or behind another
+/// filter, and with `/JBIG2Globals`, which the new image doesn't refer to. Below 450 ppi it is
+/// stored again only when that is smaller: a generic region of text stays under Group 4, which
+/// is larger, and under Retain, and becomes symbols with JBIG2 asked for; behind ASCIIHex it is
+/// stored again alone, as Group 4 where the hex is spaced out. A JBIG2 page taller than the image
+/// is left alone.
 #[test]
-fn jbig2_images_are_left_as_they_are() {
+fn jbig2_scans_are_averaged_and_stored_again() {
     // Black squares 16 samples a side on even rows and columns: at 600 ppi, halving leaves no new
     // pixel covering both samples, so nothing keeps the picture at its resolution.
     let (w, h) = (1200u32, 480u32);
@@ -2062,38 +2066,103 @@ fn jbig2_images_are_left_as_they_are() {
             }
         }
     }
-    let coded = pdfcraft_filters::encode_jbig2_generic(&squares, w, h).unwrap();
-    let hex: Vec<u8> = coded.iter().flat_map(|b| format!("{b:02x}").into_bytes()).chain(*b">").collect();
     let grey = [("BitsPerComponent", 1.into()), ("ColorSpace", Object::name("DeviceGray"))];
+    let hex = |coded: &[u8]| -> Vec<u8> { coded.iter().flat_map(|b| format!("{b:02x}").into_bytes()).chain(*b">").collect() };
+    // An image of `coded` behind `filters`, with globals a decoder skips when `globals`, drawn at
+    // `width` × `height` pt.
+    let jbig2_page = |coded: &[u8], filters: &[&str], globals: bool, (iw, ih): (u32, u32), (width, height): (f64, f64)| {
+        let mut doc = Document::new_empty();
+        let mut d = Dict::new();
+        d.set(b"Subtype".to_vec(), Object::name("Image"));
+        d.set(b"Width".to_vec(), Object::Int(iw.into()));
+        d.set(b"Height".to_vec(), Object::Int(ih.into()));
+        for (k, v) in &grey {
+            d.set(k.as_bytes().to_vec(), v.clone());
+        }
+        d.set(b"Filter".to_vec(), Object::Array(filters.iter().map(|f| Object::name(f)).collect()));
+        if globals {
+            let g = doc.add(Object::Stream(Stream::from_raw(Dict::new(), vec![0, 0, 0, 0, 0x3E, 0, 0, 0, 0, 0, 4, 0, 0, 0, 1])));
+            let mut parms = Dict::new();
+            parms.set(b"JBIG2Globals".to_vec(), Object::Ref(g));
+            let entries = filters.iter().map(|f| if *f == "JBIG2Decode" { Object::Dict(parms.clone()) } else { Object::Null }).collect();
+            d.set(b"DecodeParms".to_vec(), Object::Array(entries));
+        }
+        let data = if filters.len() > 1 { hex(coded) } else { coded.to_vec() };
+        let im = doc.add(Object::Stream(Stream::from_raw(d, data)));
+        page(&mut doc, &[("Im", im)], &format!("q {width} 0 0 {height} 20 600 cm /Im Do Q"));
+        (doc, im)
+    };
+    let coded = pdfcraft_filters::encode_jbig2_generic(&squares, w, h).unwrap();
+    // 144 × 57.6 pt is 600 ppi.
+    let at_600 = (144.0, 57.6);
     for compression in [MonoCompression::CcittG4, MonoCompression::Jbig2, MonoCompression::Retain] {
         let settings = Settings { mono: MonoSettings { compression, ..MonoSettings::REDUCE }, ..Settings::default() };
-        // 144 × 57.6 pt is 600 ppi.
-        let content = "q 144 0 0 57.6 20 600 cm /Im Do Q";
         let mut doc = Document::new_empty();
         let im = mono_image(&mut doc, w, h, &squares, None, &grey);
-        page(&mut doc, &[("Im", im)], content);
-        let r = optimize(&mut doc, &settings).unwrap();
-        assert_eq!(r.images_resampled, 1, "Flate, {compression:?}: {r:?}");
-        for (filters, data) in
-            [(vec![Object::name("JBIG2Decode")], &coded), (vec![Object::name("ASCIIHexDecode"), Object::name("JBIG2Decode")], &hex)]
-        {
-            let mut doc = Document::new_empty();
-            let mut d = Dict::new();
-            d.set(b"Subtype".to_vec(), Object::name("Image"));
-            d.set(b"Width".to_vec(), Object::Int(w.into()));
-            d.set(b"Height".to_vec(), Object::Int(h.into()));
-            for (k, v) in &grey {
-                d.set(k.as_bytes().to_vec(), v.clone());
-            }
-            d.set(b"Filter".to_vec(), Object::Array(filters.clone()));
-            let im = doc.add(Object::Stream(Stream::from_raw(d, data.clone())));
-            page(&mut doc, &[("Im", im)], content);
-            let before = stream(&doc, im);
+        page(&mut doc, &[("Im", im)], "q 144 0 0 57.6 20 600 cm /Im Do Q");
+        assert_eq!(optimize(&mut doc, &settings).unwrap().images_resampled, 1, "Flate, {compression:?}");
+        let averaged = doc.decoded_image(&stream(&doc, im)).unwrap();
+        for (filters, globals) in [(&["JBIG2Decode"][..], false), (&["ASCIIHexDecode", "JBIG2Decode"][..], false), (&["JBIG2Decode"][..], true)] {
+            let (mut doc, im) = jbig2_page(&coded, filters, globals, (w, h), at_600);
             let r = optimize(&mut doc, &settings).unwrap();
-            assert_eq!((r.images_resampled, r.images_recompressed), (0, 0), "{filters:?}, {compression:?}: {r:?}");
-            assert_eq!(stream(&doc, im), before, "{filters:?}, {compression:?}");
+            let s = stream(&doc, im);
+            let what = format!("{filters:?}, globals {globals}, {compression:?}: {r:?}");
+            assert_eq!((r.images_resampled, s.dict.int(b"Width"), s.dict.int(b"Height")), (1, Some(600), Some(240)), "{what}");
+            assert_eq!(doc.decoded_image(&s).unwrap(), averaged, "{what}");
+            assert!(!s.dict.contains(b"DecodeParms") || s.dict.name(b"Filter") == Some(&b"CCITTFaxDecode"[..]), "{what}");
+            let filter = s.dict.name(b"Filter").map(<[u8]>::to_vec);
+            // The smallest of what each compression may store; under Retain, JBIG2 again.
+            let allowed: &[&[u8]] = match compression {
+                MonoCompression::CcittG4 => &[b"CCITTFaxDecode", b"FlateDecode"],
+                MonoCompression::Jbig2 => &[b"JBIG2Decode", b"FlateDecode"],
+                MonoCompression::Retain => &[b"JBIG2Decode"],
+            };
+            assert!(filter.as_deref().is_some_and(|f| allowed.contains(&f)), "{what}: {:?}", filter.map(String::from_utf8));
         }
     }
+
+    // At 300 ppi, below 450: rendered text, whose letters repeat, coded as one generic region.
+    let (tw, th) = (600u32, 480u32);
+    let text = rendered_text(tw, th);
+    let generic = pdfcraft_filters::encode_jbig2_generic(&text, tw, th).unwrap();
+    let at_300 = (144.0, 115.2);
+    for compression in [MonoCompression::CcittG4, MonoCompression::Retain] {
+        let settings = Settings { mono: MonoSettings { compression, ..MonoSettings::REDUCE }, ..Settings::default() };
+        let (mut doc, im) = jbig2_page(&generic, &["JBIG2Decode"], false, (tw, th), at_300);
+        let before = stream(&doc, im);
+        optimize(&mut doc, &settings).unwrap();
+        assert_eq!(stream(&doc, im), before, "JBIG2 below 450 ppi, {compression:?}");
+    }
+    let jbig2_asked = Settings { mono: MonoSettings { compression: MonoCompression::Jbig2, ..MonoSettings::REDUCE }, ..Settings::default() };
+    let (mut doc, im) = jbig2_page(&generic, &["JBIG2Decode"], false, (tw, th), at_300);
+    let r = optimize(&mut doc, &jbig2_asked).unwrap();
+    let s = stream(&doc, im);
+    assert_eq!((r.images_resampled, r.images_recompressed, s.dict.name(b"Filter")), (0, 1, Some(&b"JBIG2Decode"[..])), "{r:?}");
+    assert!(s.raw.len() * 2 < generic.len(), "symbols {} bytes, the generic region {}", s.raw.len(), generic.len());
+    assert_eq!(doc.decoded_image(&s).unwrap(), text);
+    // Behind ASCIIHex it is stored again alone, being smaller so.
+    let (mut doc, im) = jbig2_page(&generic, &["ASCIIHexDecode", "JBIG2Decode"], false, (tw, th), at_300);
+    optimize(&mut doc, &jbig2_asked).unwrap();
+    let s = stream(&doc, im);
+    assert_eq!((s.filters().len(), s.dict.name(b"Filter")), (1, Some(&b"JBIG2Decode"[..])));
+    assert_eq!(doc.decoded_image(&s).unwrap(), text);
+    // So it is as Group 4 when that is smaller: here the hex digits are spaced out, as ASCIIHex
+    // allows, so that the stream is many times the code.
+    let (mut doc, im) = jbig2_page(&generic, &["ASCIIHexDecode", "JBIG2Decode"], false, (tw, th), at_300);
+    let mut padded = stream(&doc, im);
+    padded.raw = generic.iter().flat_map(|b| format!("{b:02x}{}", " ".repeat(30)).into_bytes()).chain(*b">").collect::<Vec<u8>>().into();
+    doc.set(im, Object::Stream(padded));
+    optimize(&mut doc, &Settings::default()).unwrap();
+    let s = stream(&doc, im);
+    assert_eq!((s.filters().len(), s.dict.name(b"Filter")), (1, Some(&b"CCITTFaxDecode"[..])), "Group 4 alone");
+    assert_eq!(doc.decoded_image(&s).unwrap(), text);
+
+    // A JBIG2 page taller than the image: the renderer draws the whole page into it, so it isn't
+    // read, and stays as it is.
+    let (mut doc, im) = jbig2_page(&coded, &["JBIG2Decode"], false, (w, h - 8), at_600);
+    let before = stream(&doc, im);
+    optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(stream(&doc, im), before, "a taller page");
 }
 
 /// A whole 300 dpi letter page of rendered text, more marks than one JBIG2 text region of the
