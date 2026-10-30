@@ -142,9 +142,14 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
     let mut names: Vec<(Vec<String>, bool, &str)> = Vec::new();
     for (k, (list, en)) in lists.into_iter().zip(EN).chain(typed_english.into_iter().zip(EN)).enumerate() {
         for (name, english) in list.iter().zip(en.iter()) {
-            let n: Vec<String> = name.chars().map(lower).collect();
-            if !n.is_empty() && n.len() <= MAX_NAME_CHARS {
-                names.push((n, k % 4 < 2, english));
+            // A short name ending in a dot ("mar.") is also read typed without it, as the same
+            // kind of name, so that where it equals another ("Mar", March) the format decides.
+            let bare = name.trim_end_matches('.');
+            for name in std::iter::once(*name).chain((bare.len() < name.len()).then_some(bare)) {
+                let n: Vec<String> = name.chars().map(lower).collect();
+                if !n.is_empty() && n.len() <= MAX_NAME_CHARS {
+                    names.push((n, k % 4 < 2, english));
+                }
             }
         }
     }

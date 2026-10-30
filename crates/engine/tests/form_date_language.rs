@@ -316,3 +316,42 @@ fn an_english_run_that_prints_the_stored_value_is_drawn() {
     assert_eq!(pdfcraft_forms::undrawn_fields(&doc), [("fails".to_string(), 'о')]);
     use_form_date_language("en");
 }
+
+/// What `util.scand(fmt, text)` reads, as `yyyy-mm-dd`, or `null`.
+fn scanned(fmt: &str, text: &str) -> String {
+    let doc = DocInfo { file_name: "form.pdf".into(), num_pages: 1, page: 0, info: Vec::new(), xfa: false };
+    let script = format!("var d = util.scand('{fmt}', {text:?}); event.value = d ? util.printd('yyyy-mm-dd', d) : 'null';");
+    let o = run(&script, &Event::field("Format", "date", ""), &doc, &[], &[], Limits::default());
+    assert_eq!(o.error, None);
+    o.value
+}
+
+/// A short weekday typed without its dot ("mar" for French "mar.", Tuesday) is the weekday where
+/// the format has one, not the English "Mar" (March) that is the only other name of its length:
+/// "mar 6 janv 2026" read as no date in French and Romanian (#5303).
+#[test]
+fn a_short_weekday_typed_without_its_dot_is_the_weekday() {
+    let _names = names_lock();
+    let mut bad = Vec::new();
+    let cases = [
+        ("fr", "ddd d mmm yyyy", "Mar 6 janv 2026", "2026-01-06"),
+        ("fr", "ddd d mmm yyyy", "mar 17 mars 2026", "2026-03-17"),
+        ("fr", "mmm d yyyy ddd", "janv 6 2026 mar", "2026-01-06"),
+        ("fr", "ddd dd/mm/yyyy", "mar 06/01/2026", "2026-01-06"),
+        ("ro", "ddd d mmm yyyy", "mar 6 ian 2026", "2026-01-06"),
+        ("ro", "ddd dd/mm/yyyy", "mar 06/01/2026", "2026-01-06"),
+    ];
+    for (language, fmt, text, want) in cases {
+        use_form_date_language(language);
+        let got = scanned(fmt, text);
+        if got != want {
+            bad.push(format!("{language} scand {fmt}: {text:?} -> {got}"));
+        }
+        let read = parse_date(text, fmt).map(|d| format!("{:04}-{:02}-{:02}", d.y, d.m, d.d));
+        if read.as_deref() != Some(want) {
+            bad.push(format!("{language} forms {fmt}: {text:?} -> {read:?}"));
+        }
+    }
+    use_form_date_language("en");
+    assert!(bad.is_empty(), "{}", bad.join("; "));
+}
