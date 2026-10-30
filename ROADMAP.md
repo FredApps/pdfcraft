@@ -764,3 +764,5 @@ Newest first: the date, what moved, and the new overall estimate.
 - **2026-10-22 (PR #3227 integration):** M11: integrate upstream `80b7d215`; retain partial target-version compatibility and upstream content-boundary and image-size regression coverage. Scope and estimates unchanged.
 
 - 2026-10-29 — M12 / #3941 review follow-up: reject document evidence with Adobe provenance and licence expressions without identifiers; synthetic regression coverage, no XFA behavior change.
+
+- 2026-10-29 — M12 / #3941: resolve instance managers through their live owning container when unnamed wrappers share a SOM; preserve nested initial and empty groups after add, undo/redo and save/reopen. Lookup work remains budgeted.

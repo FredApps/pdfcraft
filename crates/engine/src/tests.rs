@@ -8568,6 +8568,52 @@ fn xfa_zero_instances_added_parent_preserves_nested_initial_instances() {
     }
 }
 
+/// Unnamed wrappers share their parent's SOM but own separate retained row definitions.
+/// Adding through their manager must persist nested defaults, including empty groups.
+#[test]
+fn xfa_unnamed_wrappers_preserve_added_rows_nested_initial_instances() {
+    for named_root in [true, false] {
+        let mut tpl = pdfcraft_xfa::fixtures::optional_rows(0)
+            .replace(r#"<field name="entry""#, r#"<subform name="inner" layout="tb"><occur min="0" initial="1" max="2"/><field name="entry""#)
+            .replace("</value></field>", "</value></field><subform name=\"empty\"><occur min=\"0\" initial=\"2\" max=\"2\"/></subform></subform>")
+            .replace(r#"  <subform name="row""#, r#"  <subform layout="tb"><subform layout="tb"><subform name="row""#)
+            .replace(" </subform>\n</template>", " </subform></subform></subform>\n</template>");
+        if !named_root {
+            tpl = tpl.replace(r#"name="form" "#, "");
+        }
+        let mut s = Session::new().with_xfa_time_scale(100);
+        let id = s.open("unnamed-wrapper.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&tpl)), None).unwrap();
+        let assert_rows = |s: &Session, id, expected| {
+            let doc = s.get(id).unwrap();
+            assert_eq!(doc.form.iter().filter(|f| f.name.starts_with("entry")).count(), expected);
+            if expected > 0 {
+                let data = pdfcraft_xfa::data_of(&doc.editor.as_ref().unwrap().cos).unwrap();
+                for i in 0..expected {
+                    let row = format!("{}row[{i}]", if named_root { "form[0]." } else { "" });
+                    assert_eq!(data.count(&pdfcraft_xfa::som_to_path(&row), "inner"), 1);
+                    assert_eq!(data.count(&pdfcraft_xfa::som_to_path(&format!("{row}.inner[0]")), "empty"), 2);
+                }
+            }
+        };
+        assert_rows(&s, id, 0);
+        for expected in [1, 2] {
+            assert_eq!(s.run_javascript(id, "", Some("add")).unwrap().error, None);
+            assert_rows(&s, id, expected);
+        }
+        assert_eq!(s.run_javascript(id, "", Some("remove")).unwrap().error, None);
+        assert_rows(&s, id, 1);
+        s.undo(id).unwrap();
+        assert_rows(&s, id, 2);
+        s.redo(id).unwrap();
+        assert_rows(&s, id, 1);
+        let bytes = s.save_bytes(id).unwrap();
+        let reopened = s.open("unnamed-wrapper-reopened.pdf", None, bytes, None).unwrap();
+        assert_rows(&s, reopened, 1);
+        assert_eq!(s.run_javascript(reopened, "", Some("add")).unwrap().error, None);
+        assert_rows(&s, reopened, 2);
+    }
+}
+
 /// A removed parent shifts SOM indices: cached child managers must follow the new
 /// parent, and a newly added sibling must start from its own template defaults.
 #[test]

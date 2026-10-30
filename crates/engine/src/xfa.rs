@@ -165,16 +165,24 @@ fn to_js(n: &FormNode) -> XfaNode {
     }
 }
 
-/// Find a live container by exact indexed SOM, without entering dormant definitions.
-fn find_container<'a>(n: &'a FormNode, som: &str, depth: usize, visited: &mut usize) -> Option<&'a FormNode> {
+/// Find the live owner of a row, not just the first container with its parent's SOM.
+/// Unnamed wrappers share that SOM. Inspect retained definitions for ownership, but
+/// never descend into them; all inspected candidates spend the replay work budget.
+fn find_container<'a>(n: &'a FormNode, som: &str, name: &str, depth: usize, visited: &mut usize) -> Option<&'a FormNode> {
     *visited = visited.saturating_add(1);
     if depth > 64 {
         return None;
     }
-    if n.som == som && n.kind != Some(NodeKind::Field) {
+    if n.som == som
+        && n.kind != Some(NodeKind::Field)
+        && n.children.iter().chain(&n.instance_templates).any(|child| {
+            *visited = visited.saturating_add(1);
+            child.name == name && child.kind == Some(NodeKind::Subform)
+        })
+    {
         return Some(n);
     }
-    n.children.iter().find_map(|c| find_container(c, som, depth + 1, visited))
+    n.children.iter().find_map(|c| find_container(c, som, name, depth + 1, visited))
 }
 
 /// Counts and default descendant SOM suffixes for one manager during an effect batch.
@@ -188,7 +196,7 @@ impl InstanceState {
     /// Read a manager once from the current tree. Only live descendants of its retained
     /// definition seed data; dormant children must stay absent. Traversal is bounded.
     fn read(root: &FormNode, parent_som: &str, name: &str, work: &mut usize) -> Result<Self, String> {
-        let parent = if parent_som.is_empty() { Some(root) } else { find_container(root, parent_som, 0, work) };
+        let parent = find_container(root, parent_som, name, 0, work);
         let count = parent.map_or(0, |p| {
             *work = work.saturating_add(p.children.len());
             p.children.iter().filter(|c| c.name == name).count()
