@@ -1,5 +1,5 @@
 use super::dates::{data_date_pattern, data_to_iso, iso_to_data, iso_to_pattern, pattern_to_iso};
-use super::path::{data_path, parse_datasets, som_to_path};
+use super::path::{bound_value, data_path, parse_datasets, som_to_path};
 use super::{DataPath, Dict, Document, ObjRef, Object, Template};
 
 /// What a field holds, for writing the datasets.
@@ -163,7 +163,12 @@ fn values_at(doc: &Document, tpl: Option<&Template>, fields: &[FieldDatum]) -> V
     for f in fields {
         let som = som_of(doc, f);
         let path = path_of(tpl, &som);
-        let Some(text) = data.value_at(&path) else { continue };
+        let Some(text) = (match tpl {
+            Some(t) => bound_value(t, &data, &som),
+            None => data.value_at(&path),
+        }) else {
+            continue;
+        };
         let text = text.as_str();
         let value = match &f.data {
             FieldData::Text(_) => FieldData::Text(match date_pattern_of(doc, f) {
