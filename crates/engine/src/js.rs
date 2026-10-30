@@ -199,17 +199,24 @@ impl Scripts for JsRunner {
     /// Run field `target`'s script for `event` over the form's fields, keeping what it showed and
     /// asked for; a refusal carries its last message.
     fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
-        self.run_logged(event, script, target, value, fields, true)
+        // As in Acrobat, a failing script leaves the value alone (the error goes to the console).
+        self.run_logged(event, script, target, value, fields, true).unwrap_or_else(|| ScriptResult {
+            rc: true,
+            value: value.to_string(),
+            changes: Vec::new(),
+            message: None,
+        })
     }
 
-    fn rerun_with_english_dates(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
+    fn rerun_with_english_dates(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> Option<ScriptResult> {
         pdfcraft_js::with_english_printd(true, || self.run_logged(event, script, target, value, fields, false))
     }
 }
 
 impl JsRunner {
-    /// [`Scripts::run`], keeping what the script showed and asked for only when `log`.
-    fn run_logged(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field], log: bool) -> ScriptResult {
+    /// [`Scripts::run`], keeping what the script showed and asked for only when `log`; `None`
+    /// when the script failed.
+    fn run_logged(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field], log: bool) -> Option<ScriptResult> {
         let states: Vec<_> = fields
             .iter()
             .map(|f| {
@@ -227,15 +234,14 @@ impl JsRunner {
             self.output.absorb(&o);
         }
         if o.error.is_some() {
-            // As in Acrobat, a failing script leaves the value alone (the error goes to the console).
-            return ScriptResult { rc: true, value: value.to_string(), changes: Vec::new(), message: None };
+            return None;
         }
-        ScriptResult {
+        Some(ScriptResult {
             rc: o.rc,
             value: o.value.clone(),
             changes: changes(&states, &o.changed),
             message: (!o.rc).then(|| o.alerts.last().map(|m| m.text.clone())).flatten(),
-        }
+        })
     }
 }
 

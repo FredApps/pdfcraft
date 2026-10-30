@@ -236,8 +236,13 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
 
 /// Fills `form`'s field `name` with 18 October 2026 through the JavaScript runner.
 fn fill(doc: &mut Document, name: &str) {
+    fill_with(doc, name, "18-10-26");
+}
+
+/// Fills `form`'s field `name` with `value` through the JavaScript runner.
+fn fill_with(doc: &mut Document, name: &str, value: &str) {
     let mut js = JsRunner::new(doc, "form.pdf");
-    pdfcraft_forms::set_value_with(doc, name, &FieldValue::Text("18-10-26".into()), &mut js).expect("fills");
+    pdfcraft_forms::set_value_with(doc, name, &FieldValue::Text(value.into()), &mut js).expect("fills");
 }
 
 /// Month names in the date language that no font of the field can draw are drawn in English,
@@ -290,5 +295,24 @@ fn format_scripts_print_dates_in_english_where_the_field_cannot_draw_them() {
     assert_eq!(pdfcraft_forms::undrawn_fields(&doc), [("hi".to_string(), 'П')]);
     // The English run is the appearance's alone: scripts go on printing the date language.
     assert_eq!(printd("dd-mmm-yy", "18-окт.-26"), "18-окт.-26|18-окт.-26");
+    use_form_date_language("en");
+}
+
+/// A Format script's English run is kept when it ran, even where it prints the stored value
+/// again: a Helvetica field storing "18-Oct-26", printed again as `dd-mmm-yy`, showed
+/// "18-????.-26" in Russian. A script that fails keeps what it showed, reported undrawn (#5303).
+#[test]
+fn an_english_run_that_prints_the_stored_value_is_drawn() {
+    let _names = names_lock();
+    let script = "event.value = util.printd(\"dd-mmm-yy\", util.scand(\"dd-mmm-yy\", event.value));";
+    use_form_date_language("ru");
+    let mut doc = form(&[("helv", "Helv", script), ("fails", "Helv", "throw new Error(\"no\");")]);
+    fill_with(&mut doc, "helv", "18-Oct-26");
+    let helv = appearance(&doc, "helv");
+    assert!(contains(&helv, b"(18-Oct-26) Tj"), "{}", String::from_utf8_lossy(&helv));
+    assert!(!helv.contains(&b'?'), "{}", String::from_utf8_lossy(&helv));
+    assert!(pdfcraft_forms::undrawn_fields(&doc).is_empty());
+    fill_with(&mut doc, "fails", "18-окт.-26");
+    assert_eq!(pdfcraft_forms::undrawn_fields(&doc), [("fails".to_string(), 'о')]);
     use_form_date_language("en");
 }

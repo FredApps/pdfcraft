@@ -433,12 +433,10 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
         let (stream, missing) = match &shown {
             Some(s) => {
                 let drawn = appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(s), false);
-                // Taken only when it draws whole, and not when it is the stored value (what a
-                // script that fails the second time leaves).
+                // Taken when the English run happened and draws whole, even where it is the
+                // stored value ("18-Oct-26" printed again from itself).
                 let again = match (&drawn.1, values) {
-                    (Some(_), [one]) => {
-                        english.get_or_insert_with(|| scripting::formatted_in_english(doc, f, one, scripts)).as_ref().filter(|e| *e != s && *e != one)
-                    }
+                    (Some(_), [one]) => english.get_or_insert_with(|| scripting::formatted_in_english(doc, f, one, scripts)).as_ref(),
                     _ => None,
                 };
                 match again.map(|e| appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(e), false)) {
