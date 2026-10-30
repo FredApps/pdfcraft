@@ -60,6 +60,13 @@ pub struct ScriptResult {
 pub trait Scripts {
     /// Run `script` for `event` on `target`, whose value is `value`; `fields` is the whole form.
     fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult;
+
+    /// [`Self::run`] again for an appearance, with dates written in English names (`util.printd`)
+    /// because no font of the field can draw the date language's (#5303); what it logs was
+    /// already logged by the first run.
+    fn rerun_with_english_dates(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
+        self.run(event, script, target, value, fields)
+    }
 }
 
 /// No script engine (or JavaScript turned off): scripts change nothing.
@@ -95,6 +102,14 @@ pub(crate) fn accept(doc: &mut Document, f: &Field, value: &str, scripts: &mut d
 pub(crate) fn formatted(doc: &Document, f: &Field, value: &str, scripts: &mut dyn Scripts) -> Option<String> {
     let js = f.actions.scripts.format.as_ref()?;
     let r = scripts.run(FieldEvent::Format, js, f, value, &fields(doc));
+    Some(r.value)
+}
+
+/// [`formatted`] with dates in English names, for widgets whose fonts can't draw the date
+/// language's.
+pub(crate) fn formatted_in_english(doc: &Document, f: &Field, value: &str, scripts: &mut dyn Scripts) -> Option<String> {
+    let js = f.actions.scripts.format.as_ref()?;
+    let r = scripts.rerun_with_english_dates(FieldEvent::Format, js, f, value, &fields(doc));
     Some(r.value)
 }
 

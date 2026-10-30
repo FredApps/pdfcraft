@@ -589,6 +589,11 @@ fn apply_mask(mask: &str, text: &str) -> Option<String> {
 
 /// The text shown for a value (the Format event).
 pub fn format_value(f: &Format, value: &str) -> String {
+    format_value_in(f, value, &date_names())
+}
+
+/// [`format_value`] with month and weekday names from `names`.
+pub fn format_value_in(f: &Format, value: &str, names: &DateNames) -> String {
     if value.is_empty() {
         return String::new();
     }
@@ -617,7 +622,7 @@ pub fn format_value(f: &Format, value: &str) -> String {
             ),
             None => value.to_string(),
         },
-        Format::Date(fmt) | Format::Time(fmt) => parse_date(value, fmt).map_or_else(|| value.to_string(), |dt| format_date(dt, fmt)),
+        Format::Date(fmt) | Format::Time(fmt) => parse_date(value, fmt).map_or_else(|| value.to_string(), |dt| format_date_in(dt, fmt, names)),
         Format::Special(n) => apply_mask(SPECIAL_MASKS[(*n).min(3) as usize], value).unwrap_or_else(|| value.to_string()),
         Format::Mask(m) => apply_mask(m, value).unwrap_or_else(|| value.to_string()),
     }

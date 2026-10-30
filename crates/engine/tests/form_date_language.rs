@@ -1,9 +1,23 @@
 //! Form date fields name months in the app's date language (#5303). Its own test binary: the
-//! names are process-wide, so other tests must not see them change.
+//! names are process-wide, so other tests must not see them change, and its tests take turns.
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use pdfcraft_cos::{Document, Object};
 use pdfcraft_engine::dates::use_form_date_language;
+use pdfcraft_engine::js::JsRunner;
+use pdfcraft_forms::FieldValue;
 use pdfcraft_forms::af::{DateTime, Format, format_date, format_value, keystroke, parse_date};
 use pdfcraft_js::{DocInfo, Event, Limits, run};
+
+/// Held by each test while it changes the process-wide date names, which start as English (a
+/// failed test may have left others).
+fn names_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let lock = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    use_form_date_language("en");
+    lock
+}
 
 /// `util.printd(fmt)` of 18 October 2026, then of what `util.scand(fmt, typed)` reads.
 fn printd(fmt: &str, typed: &str) -> String {
@@ -16,6 +30,7 @@ fn printd(fmt: &str, typed: &str) -> String {
 
 #[test]
 fn form_dates_follow_the_date_language() {
+    let _names = names_lock();
     let oct18 = DateTime { y: 2026, m: 10, d: 18, hh: 0, mm: 0, ss: 0 };
     let dd_mmm_yy = Format::Date("dd-mmm-yy".into());
     // English until the app says otherwise.
@@ -84,4 +99,158 @@ fn every_date_language_reads_back_what_it_writes() {
     }
     use_form_date_language("en");
     assert!(bad.is_empty(), "{} failures:\n{}", bad.len(), bad.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// A form whose text fields are each `(name, font, format script)`: `/Helv` is Helvetica with
+/// WinAnsi, `/Song` a Chinese font with a Unicode CMap, which also holds Cyrillic.
+fn form(fields: &[(&str, &str, &str)]) -> Document {
+    let n = fields.len();
+    let first = 6;
+    let refs = |from: usize| (from..from + n).map(|i| format!("{i} 0 R")).collect::<Vec<_>>().join(" ");
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{}] >>", refs(first)),
+        format!("<< /Fields [{}] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R /Song {} 0 R >> >> >>", refs(first), first + n),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    for (i, (name, font, js)) in fields.iter().enumerate() {
+        let js = js.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+        let y = 700 - 30 * i;
+        objs.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /DA (/{font} 10 Tf 0 g) /Rect [50 {y} 300 {}] /P 3 0 R /AA << /F << /S /JavaScript /JS ({js}) >> >> >>",
+            y + 20
+        ));
+    }
+    objs.push("<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> >>] >>".into());
+    let mut out = b"%PDF-1.7
+"
+    .to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(
+            format!(
+                "{} 0 obj
+{o}
+endobj
+",
+                i + 1
+            )
+            .as_bytes(),
+        );
+    }
+    let xref = out.len();
+    out.extend_from_slice(
+        format!(
+            "xref
+0 {}
+0000000000 65535 f 
+",
+            objs.len() + 1
+        )
+        .as_bytes(),
+    );
+    for o in offsets {
+        out.extend_from_slice(
+            format!(
+                "{o:010} 00000 n 
+"
+            )
+            .as_bytes(),
+        );
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer
+<< /Size {} /Root 1 0 R >>
+startxref
+{xref}
+%%EOF
+",
+            objs.len() + 1
+        )
+        .as_bytes(),
+    );
+    Document::open(Arc::new(out)).expect("opens")
+}
+
+/// The content of field `name`'s normal appearance.
+fn appearance(doc: &Document, name: &str) -> Vec<u8> {
+    let all = pdfcraft_forms::fields(doc);
+    let f = all.iter().find(|f| f.name == name).expect("field");
+    let widget = doc.get(f.widgets[0].obj);
+    let normal = widget.as_dict().and_then(|d| d.get(b"AP")).and_then(|a| doc.resolve(a).as_dict().and_then(|a| a.reference(b"N"))).expect("/AP /N");
+    match &*doc.get(normal) {
+        Object::Stream(s) => s.decoded().expect("decodes"),
+        other => panic!("not a stream: {other:?}"),
+    }
+}
+
+/// What a Unicode-CMap (UCS-2) font is given for `text`.
+fn ucs2(text: &str) -> Vec<u8> {
+    text.encode_utf16().flat_map(u16::to_be_bytes).collect()
+}
+
+fn contains(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Fills `form`'s field `name` with 18 October 2026 through the JavaScript runner.
+fn fill(doc: &mut Document, name: &str) {
+    let mut js = JsRunner::new(doc, "form.pdf");
+    pdfcraft_forms::set_value_with(doc, name, &FieldValue::Text("18-10-26".into()), &mut js).expect("fills");
+}
+
+/// Month names in the date language that no font of the field can draw are drawn in English,
+/// never as `?` ("18-????.-26" in Russian); a font that holds them keeps them (#5303).
+#[test]
+fn date_names_no_field_font_can_draw_are_drawn_in_english() {
+    let _names = names_lock();
+    let date = "AFDate_FormatEx(\"dd-mmm-yy\");";
+    let fields = [("helv", "Helv", date), ("song", "Song", date)];
+    for (language, local) in [("ru", "окт."), ("cs", "říj"), ("ja", "10月"), ("el", "Οκτ")] {
+        use_form_date_language(language);
+        let mut doc = form(&fields);
+        fill(&mut doc, "helv");
+        fill(&mut doc, "song");
+        let helv = appearance(&doc, "helv");
+        assert!(contains(&helv, b"(18-Oct-26) Tj"), "{language}: {}", String::from_utf8_lossy(&helv));
+        assert!(!helv.contains(&b'?'), "{language}: {}", String::from_utf8_lossy(&helv));
+        assert!(pdfcraft_forms::undrawn_fields(&doc).is_empty(), "{language}");
+        let song = appearance(&doc, "song");
+        assert!(contains(&song, &ucs2(&format!("18-{local}-26"))), "{language} keeps its name: {song:?}");
+    }
+    // Names Helvetica holds are kept: Italian "ott".
+    use_form_date_language("it");
+    let mut doc = form(&fields);
+    fill(&mut doc, "helv");
+    assert!(contains(&appearance(&doc, "helv"), b"(18-ott-26) Tj"));
+    use_form_date_language("en");
+}
+
+/// A Format script's `util.printd` is run again with English names for a field whose fonts
+/// can't draw the date language's, and kept where they can (#5303).
+#[test]
+fn format_scripts_print_dates_in_english_where_the_field_cannot_draw_them() {
+    let _names = names_lock();
+    let script = "event.value = event.value ? util.printd(\"dd-mmm-yy\", util.scand(\"dd-mm-yy\", event.value)) + \" !\" : \"\";";
+    let fields = [("helv", "Helv", script), ("song", "Song", script)];
+    use_form_date_language("ru");
+    let mut doc = form(&fields);
+    fill(&mut doc, "helv");
+    fill(&mut doc, "song");
+    let helv = appearance(&doc, "helv");
+    assert!(contains(&helv, b"(18-Oct-26 !) Tj"), "{}", String::from_utf8_lossy(&helv));
+    assert!(!helv.contains(&b'?'), "{}", String::from_utf8_lossy(&helv));
+    assert!(pdfcraft_forms::undrawn_fields(&doc).is_empty());
+    assert!(contains(&appearance(&doc, "song"), &ucs2("18-окт.-26 !")));
+    // A script whose text has no English either keeps it, reported as undrawn.
+    let greeting = [("hi", "Helv", "event.value = \"Привет \" + util.printd(\"mmm\", new Date(2026, 9, 18));")];
+    let mut doc = form(&greeting);
+    fill(&mut doc, "hi");
+    assert_eq!(pdfcraft_forms::undrawn_fields(&doc), [("hi".to_string(), 'П')]);
+    // The English run is the appearance's alone: scripts go on printing the date language.
+    assert_eq!(printd("dd-mmm-yy", "18-окт.-26"), "18-окт.-26|18-окт.-26");
+    use_form_date_language("en");
 }

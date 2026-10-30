@@ -199,6 +199,17 @@ impl Scripts for JsRunner {
     /// Run field `target`'s script for `event` over the form's fields, keeping what it showed and
     /// asked for; a refusal carries its last message.
     fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
+        self.run_logged(event, script, target, value, fields, true)
+    }
+
+    fn rerun_with_english_dates(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
+        pdfcraft_js::with_english_printd(true, || self.run_logged(event, script, target, value, fields, false))
+    }
+}
+
+impl JsRunner {
+    /// [`Scripts::run`], keeping what the script showed and asked for only when `log`.
+    fn run_logged(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field], log: bool) -> ScriptResult {
         let states: Vec<_> = fields
             .iter()
             .map(|f| {
@@ -212,7 +223,9 @@ impl Scripts for JsRunner {
         let states = std::sync::Arc::new(states);
         let ev = pdfcraft_js::Event::field(event.name(), &target.name, value);
         let o = pdfcraft_js::run_shared(script, &ev, &self.doc, std::sync::Arc::clone(&states), &self.doc_scripts, Limits::default());
-        self.output.absorb(&o);
+        if log {
+            self.output.absorb(&o);
+        }
         if o.error.is_some() {
             // As in Acrobat, a failing script leaves the value alone (the error goes to the console).
             return ScriptResult { rc: true, value: value.to_string(), changes: Vec::new(), message: None };

@@ -250,6 +250,35 @@ fn names() -> Names {
     *NAMES.read().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+std::thread_local! {
+    /// Whether `util.printd` on this thread writes English names, whatever the date language.
+    static PRINTD_ENGLISH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `run` with `util.printd` writing English month and weekday names when `english` (scripts
+/// it starts carry this to their own thread): for an appearance whose fonts can't draw the date
+/// language's names, which would come out as `?` (#5303). `util.scand` still reads both.
+pub fn with_english_printd<R>(english: bool, run: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PRINTD_ENGLISH.with(|e| e.set(self.0));
+        }
+    }
+    let _restore = Restore(PRINTD_ENGLISH.with(|e| e.replace(english)));
+    run()
+}
+
+/// Whether [`with_english_printd`] is on for this thread.
+pub(crate) fn printd_english() -> bool {
+    PRINTD_ENGLISH.with(std::cell::Cell::get)
+}
+
+/// The names `util.printd` writes.
+fn printd_names() -> Names {
+    if printd_english() { ENGLISH } else { names() }
+}
+
 /// `util.printd(cFormat, oDate)`: yyyy yy mmmm mmm mm m dddd ddd dd d HH H hh h MM M ss s tt,
 /// and the numeric formats 0 (D:yyyymmddHHMMss), 1 (yyyy.mm.dd HH:MM:ss) and 2 (m/d/yy h:MM:ss tt).
 pub(crate) fn printd(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
@@ -277,7 +306,7 @@ pub(crate) fn printd(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResu
     let (y, mo, day, wd, h, mi, sec) =
         (part("getFullYear")?, part("getMonth")?, part("getDate")?, part("getDay")?, part("getHours")?, part("getMinutes")?, part("getSeconds")?);
     let mut out = String::new();
-    let (months, months_short, days, days_short) = names();
+    let (months, months_short, days, days_short) = printd_names();
     let b = fmt.as_bytes();
     let mut i = 0;
     while i < b.len() {

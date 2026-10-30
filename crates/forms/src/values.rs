@@ -426,9 +426,26 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
     };
     let in_place = f.kind == FieldKind::Text && f.has(flags::PASSWORD);
     let mut undrawn = false;
+    // The Format script again with English month and weekday names, once, for widgets whose
+    // fonts can't draw the date language's (#5303).
+    let mut english: Option<Option<String>> = None;
     for w in &f.widgets {
         let (stream, missing) = match &shown {
-            Some(s) => appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(s), false),
+            Some(s) => {
+                let drawn = appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(s), false);
+                // Taken only when it draws whole, and not when it is the stored value (what a
+                // script that fails the second time leaves).
+                let again = match (&drawn.1, values) {
+                    (Some(_), [one]) => {
+                        english.get_or_insert_with(|| scripting::formatted_in_english(doc, f, one, scripts)).as_ref().filter(|e| *e != s && *e != one)
+                    }
+                    _ => None,
+                };
+                match again.map(|e| appearance::field_appearance_drawn(doc, f, w, std::slice::from_ref(e), false)) {
+                    Some(english) if english.1.is_none() => english,
+                    _ => drawn,
+                }
+            }
             None => appearance::field_appearance_drawn(doc, f, w, values, true),
         };
         undrawn |= missing.is_some();
