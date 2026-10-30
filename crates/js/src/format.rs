@@ -134,6 +134,29 @@ const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "Jun
 
 const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+/// Month and weekday names (weekdays from Sunday): full, then short.
+type Names = ([&'static str; 12], [&'static str; 12], [&'static str; 7], [&'static str; 7]);
+
+const ENGLISH: Names = (
+    MONTHS,
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    DAYS,
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+);
+
+static NAMES: std::sync::RwLock<Names> = std::sync::RwLock::new(ENGLISH);
+
+/// Sets the month and weekday names `util.printd` writes for `mmmm`, `mmm`, `dddd` and `ddd`
+/// (weekdays from Sunday), as a localized Acrobat writes its own language's (#5303).
+/// `util.scand` reads them as well as English.
+pub fn set_date_names(months: [&'static str; 12], months_short: [&'static str; 12], days: [&'static str; 7], days_short: [&'static str; 7]) {
+    *NAMES.write().unwrap_or_else(std::sync::PoisonError::into_inner) = (months, months_short, days, days_short);
+}
+
+fn names() -> Names {
+    *NAMES.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// `util.printd(cFormat, oDate)`: yyyy yy mmmm mmm mm m dddd ddd dd d HH H hh h MM M ss s tt,
 /// and the numeric formats 0 (D:yyyymmddHHMMss), 1 (yyyy.mm.dd HH:MM:ss) and 2 (m/d/yy h:MM:ss tt).
 pub(crate) fn printd(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
@@ -161,6 +184,7 @@ pub(crate) fn printd(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResu
     let (y, mo, day, wd, h, mi, sec) =
         (part("getFullYear")?, part("getMonth")?, part("getDate")?, part("getDay")?, part("getHours")?, part("getMinutes")?, part("getSeconds")?);
     let mut out = String::new();
+    let (months, months_short, days, days_short) = names();
     let b = fmt.as_bytes();
     let mut i = 0;
     while i < b.len() {
@@ -186,13 +210,13 @@ pub(crate) fn printd(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResu
                 }
             }
             b'm' => match run {
-                r if r >= 4 => out.push_str(MONTHS[mo as usize % 12]),
-                3 => out.push_str(&MONTHS[mo as usize % 12][..3]),
+                r if r >= 4 => out.push_str(months.get(mo.rem_euclid(12) as usize).copied().unwrap_or_default()),
+                3 => out.push_str(months_short.get(mo.rem_euclid(12) as usize).copied().unwrap_or_default()),
                 n => push_num(&mut out, mo + 1, n),
             },
             b'd' => match run {
-                r if r >= 4 => out.push_str(DAYS[wd as usize % 7]),
-                3 => out.push_str(&DAYS[wd as usize % 7][..3]),
+                r if r >= 4 => out.push_str(days.get(wd.rem_euclid(7) as usize).copied().unwrap_or_default()),
+                3 => out.push_str(days_short.get(wd.rem_euclid(7) as usize).copied().unwrap_or_default()),
                 n => push_num(&mut out, day, n),
             },
             b'H' => push_num(&mut out, h, run),
@@ -435,11 +459,13 @@ fn scan_date(fmt: &str, text: &str, this_year: i32) -> Option<Scanned> {
                 p += 1;
             }
             (ScanPart::Field { unit: DateUnit::MonthName, .. }, ScanToken::Letters(l)) => {
-                v.mo = Some(named(&MONTHS, l)?.saturating_add(1));
+                let (months, months_short, ..) = names();
+                v.mo = Some(named(&months, l).or_else(|| named(&months_short, l)).or_else(|| named(&MONTHS, l))?.saturating_add(1));
                 p += 1;
             }
             (ScanPart::Field { unit: DateUnit::Weekday, .. }, ScanToken::Letters(l)) => {
-                named(&DAYS, l)?;
+                let (.., days, days_short) = names();
+                named(&days, l).or_else(|| named(&days_short, l)).or_else(|| named(&DAYS, l))?;
                 p += 1;
             }
             (ScanPart::Field { unit: DateUnit::AmPm, .. }, ScanToken::Letters(l)) => {
@@ -512,7 +538,8 @@ fn named(names: &[&str], word: &str) -> Option<u32> {
     let word = word.to_lowercase();
     let i = names.iter().position(|n| {
         let n = n.to_lowercase();
-        word == n || n.get(..3) == Some(word.as_str())
+        // A short name may end in a dot ("Okt."); three letters may be cut from any name.
+        word == n || word == n.trim_end_matches('.') || n.chars().take(3).collect::<String>() == word
     })?;
     u32::try_from(i).ok()
 }

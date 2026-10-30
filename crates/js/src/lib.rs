@@ -43,6 +43,7 @@ mod run;
 
 #[cfg(test)]
 pub(crate) use format::PRINTD_SCANNED;
+pub use format::set_date_names;
 use format::{printd, printf, printx, scand};
 pub(crate) use globals::menu_item;
 use globals::platform;

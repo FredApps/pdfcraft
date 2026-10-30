@@ -89,6 +89,46 @@ const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "Jun
 
 const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+/// The month and weekday names `mmmm`, `mmm`, `dddd` and `ddd` write (weekdays from Sunday), as
+/// a localized Acrobat writes them in its own language (#5303).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DateNames {
+    pub months: [&'static str; 12],
+    pub months_short: [&'static str; 12],
+    pub days: [&'static str; 7],
+    pub days_short: [&'static str; 7],
+}
+
+/// English, the names until the app sets others.
+pub const ENGLISH_DATE_NAMES: DateNames = DateNames {
+    months: MONTHS,
+    months_short: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    days: DAYS,
+    days_short: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+};
+
+static DATE_NAMES: std::sync::RwLock<DateNames> = std::sync::RwLock::new(ENGLISH_DATE_NAMES);
+
+/// Sets the names date formats write from now on (the app's date language); typed dates are read
+/// in them and in English.
+pub fn set_date_names(names: DateNames) {
+    *DATE_NAMES.write().unwrap_or_else(std::sync::PoisonError::into_inner) = names;
+}
+
+/// The names date formats write.
+pub fn date_names() -> DateNames {
+    *DATE_NAMES.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The month (1 to 12) a typed word names: a start of at least three letters of a month's name,
+/// or its whole short name, in `names` or in English.
+fn month_named(word: &str, names: &DateNames) -> Option<u32> {
+    let w = word.to_lowercase();
+    let starts = |list: &[&str; 12]| list.iter().position(|m| w.chars().count() >= 3 && m.to_lowercase().starts_with(&w));
+    let whole = |list: &[&str; 12]| list.iter().position(|m| m.to_lowercase().trim_end_matches('.') == w);
+    starts(&names.months).or_else(|| whole(&names.months_short)).or_else(|| starts(&MONTHS)).map(|i| i as u32 + 1)
+}
+
 /// A date and time read from text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DateTime {
@@ -217,16 +257,15 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     let mut nums: VecDeque<String> = VecDeque::new();
     let mut month_name: Option<u32> = None;
     let mut cur = String::new();
+    let names = date_names();
     let flush = |cur: &mut String, nums: &mut VecDeque<String>, month: &mut Option<u32>| {
         if cur.is_empty() {
             return;
         }
         if cur.starts_with(|c: char| c.is_ascii_digit()) {
             nums.push_back(std::mem::take(cur));
-        } else if cur.len() >= 3
-            && let Some(i) = MONTHS.iter().position(|m| m.to_lowercase().starts_with(&cur.to_lowercase()))
-        {
-            *month = Some(i as u32 + 1);
+        } else if let Some(m) = month_named(cur, &names) {
+            *month = Some(m);
         }
         cur.clear();
     };
@@ -337,6 +376,11 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
 
 /// Format a date/time with Acrobat's date format letters.
 pub fn format_date(dt: DateTime, fmt: &str) -> String {
+    format_date_in(dt, fmt, &date_names())
+}
+
+/// [`format_date`] with month and weekday names from `names`.
+pub fn format_date_in(dt: DateTime, fmt: &str, names: &DateNames) -> String {
     let chars: Vec<char> = fmt.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -354,9 +398,9 @@ pub fn format_date(dt: DateTime, fmt: &str) -> String {
             ('y', _) => {
                 let _ = write!(out, "{:02}", dt.y.rem_euclid(100));
             }
-            ('m', 3..) => match MONTHS.get((dt.m as usize).wrapping_sub(1)) {
-                Some(name) if n >= 4 => out.push_str(name),
-                Some(name) => out.push_str(name.get(..3).unwrap_or(name)),
+            ('m', 3..) => match (dt.m as usize).checked_sub(1).and_then(|i| names.months.get(i).zip(names.months_short.get(i))) {
+                Some((name, _)) if n >= 4 => out.push_str(name),
+                Some((_, short)) => out.push_str(short),
                 None => {
                     let _ = write!(out, "{}", dt.m);
                 }
@@ -368,8 +412,8 @@ pub fn format_date(dt: DateTime, fmt: &str) -> String {
                 let _ = write!(out, "{}", dt.m);
             }
             ('d', 3..) => {
-                let name = DAYS.get(weekday(dt.y, dt.m, dt.d)).copied().unwrap_or_default();
-                out.push_str(if n >= 4 { name } else { name.get(..3).unwrap_or(name) });
+                let list = if n >= 4 { &names.days } else { &names.days_short };
+                out.push_str(list.get(weekday(dt.y, dt.m, dt.d)).copied().unwrap_or_default());
             }
             ('d', 2) => {
                 let _ = write!(out, "{:02}", dt.d);
