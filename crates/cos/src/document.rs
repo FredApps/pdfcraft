@@ -49,6 +49,9 @@ pub struct Document {
     repair_log: Arc<Vec<String>>,
     cache: Arc<Mutex<HashMap<u32, Arc<Object>>>>,
     objstms: Arc<Mutex<HashMap<u32, Arc<ObjStm>>>>,
+    /// What `/JBIG2Globals` streams of the file decode to, by object number: the images of a scan
+    /// share them, and each would otherwise decode them again (see `Document::jbig2_globals`).
+    jbig2_globals: Arc<Mutex<HashMap<u32, Arc<Vec<u8>>>>>,
     stream_limit: usize,
     overlay: BTreeMap<u32, Slot>,
     next_num: u32,
