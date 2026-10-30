@@ -130,7 +130,7 @@ milestone = "M1"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/filters/src/ccitt.rs::decoding_gives_the_rows_back", "crates/filters/src/ccitt.rs::group_3_rows_on_bytes_read_by_the_codes_in_the_data", "crates/cos/src/document/tests.rs::fax_images_decode_with_their_parameters", "crates/filters/src/jbig2/decode.rs::both_codings_decode_to_their_samples", "crates/filters/src/jbig2/decode.rs::what_it_cannot_decode_is_an_error", "crates/cos/src/document/tests.rs::jbig2_images_decode_with_their_globals"]
+evidence = ["crates/filters/src/ccitt.rs::decoding_gives_the_rows_back", "crates/filters/src/ccitt.rs::group_3_rows_on_bytes_read_by_the_codes_in_the_data", "crates/cos/src/document/tests.rs::fax_images_decode_with_their_parameters", "crates/filters/src/jbig2/decode.rs::both_codings_decode_to_their_samples", "crates/filters/src/jbig2/decode.rs::what_it_cannot_decode_is_an_error", "crates/cos/src/document/tests.rs::jbig2_images_decode_with_their_globals", "crates/cos/src/document/tests.rs::shared_jbig2_globals_are_read_once"]
 notes = "decoded through the hayro bootstrap for display; own codecs are M1.1/M1.2. CCITT fax decoding is in filters (decode_ccitt, through hayro-ccitt), which Document::decoded_image uses for Export ▸ Images, the optimizer and redaction; so is JBIG2 decoding (decode_jbig2, through hayro-jbig2, the page bounded before it is decoded), which it uses with the image's /JBIG2Globals (within 32 MiB) for Export ▸ Images, Copy Image, redaction and the optimizer. Byte-aligned Group 3 is read by its end-of-line codes when the data starts with one and on bytes otherwise; still limited: data with codes but none before the first row (not as T.4 sends them) is read on bytes, as the renderer draws it, and at /K 0 may come out as other rows, which the optimizer then writes back. The bootstrap renderer draws byte-aligned Group 3 whose fill ends each end-of-line code on a byte as other rows (black box, at every /K), which decode_ccitt reads right; redaction removes Group 3 on bytes whole"
 
 [[feature]]
@@ -1598,7 +1598,7 @@ milestone = "M3"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/viewer.rs::a_clicked_picture_is_selected_and_copied_in_its_original_format", "crates/ui-egui/tests/it/viewer.rs::right_click_on_a_picture_copies_it_at_full_size", "crates/ui-egui/tests/it/viewer.rs::a_picture_inside_form_artwork_under_text_is_selected_and_copied", "crates/engine/src/tests.rs::copy_image_finds_a_picture_inside_form_artwork_under_text"]
+evidence = ["crates/ui-egui/tests/it/viewer.rs::a_clicked_picture_is_selected_and_copied_in_its_original_format", "crates/ui-egui/tests/it/viewer.rs::right_click_on_a_picture_copies_it_at_full_size", "crates/ui-egui/tests/it/viewer.rs::a_picture_inside_form_artwork_under_text_is_selected_and_copied", "crates/engine/src/tests.rs::copy_image_finds_a_picture_inside_form_artwork_under_text", "crates/engine/src/tests.rs::copy_image_copies_a_jbig2_picture_behind_another_filter", "crates/engine/src/tests.rs::copy_image_reads_the_globals_of_a_jbig2_picture"]
 notes = "Select tool: a click selects a raster image (also inside Form artwork or under text) and ⌘C copies it as a file in its original format (JPEG as stored, else PNG); right-click ▸ Copy Image copies its pixels at full resolution. Missing: inline images (BI/ID/EI), JPEG 2000 images, multi-format clipboard (file and bitmap at once), the web build"
 
 [[feature]]

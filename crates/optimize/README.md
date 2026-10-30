@@ -65,7 +65,8 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
     RGB packed to one bit among them), image masks, and indexed images over `DeviceGray` or
     `DeviceRGB`, whose palette is read (Rec. 601 luma for RGB), with no decode array or one of two
     different numbers, and not drawn or listed where `/DefaultGray` or `/DefaultRGB` is or may be
-    in force. Not a separation or a DeviceN, whose tint transform isn't read, calibrated or ICC
+    in force (an indexed image referred to from beyond the page and form resources read, as an
+    annotation's appearance, may be). Not a separation or a DeviceN, whose tint transform isn't read, calibrated or ICC
     grey, or an indexed image over another base or whose two entries look alike. Not one with a soft mask, whose own size would have to
     follow; not a halftone or a dither, most of whose new pixels would cover both black and white,
     so that taking the sample covering more would turn its tones solid (a 50% screen black, a 25%
