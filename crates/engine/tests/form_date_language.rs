@@ -41,4 +41,47 @@ fn form_dates_follow_the_date_language() {
     use_form_date_language("xx");
     assert_eq!(format_value(&dd_mmm_yy, "18-10-26"), "18-Oct-26");
     assert_eq!(printd("dd-mmm-yy", "18-Oct-26"), "18-Oct-26|18-Oct-26");
+    every_date_language_reads_back_what_it_writes();
+    // Hostile typing never panics and stays quick: long, odd and mixed-script text.
+    use_form_date_language("th");
+    let junk = ["", " ", "ม.", "ม.ค.ม.ค.ม.ค.", "\u{0}", "1月1月1月", "tháng tháng", "Ottobre", "🙂ott🙂", "İstanbul ott 26"];
+    for t in junk.iter().map(|s| s.to_string()).chain(["ม.ค.1".repeat(5000), "9".repeat(100_000)]) {
+        let started = std::time::Instant::now();
+        let _ = parse_date(&t, "dd-mmm-yy");
+        let _ = keystroke(&dd_mmm_yy, "date", &t);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{} chars took {:?}", t.len(), started.elapsed());
+    }
+    use_form_date_language("en");
+}
+
+/// Every date language: what a date field writes reads back as the same date, for each date
+/// letter that writes a name, through the form path and through `util.scand`. Called from the
+/// one test, which owns the process-wide names.
+fn every_date_language_reads_back_what_it_writes() {
+    let doc = DocInfo { file_name: "form.pdf".into(), num_pages: 1, page: 0, info: Vec::new(), xfa: false };
+    let mut bad = Vec::new();
+    for l in pdfcraft_engine::dates::DATE_LANGUAGES.iter() {
+        use_form_date_language(l.code);
+        for m in 1..=12u32 {
+            let dt = DateTime { y: 2026, m, d: 18, hh: 0, mm: 0, ss: 0 };
+            for fmt in ["dd-mmm-yy", "d mmmm yyyy", "dddd, mmmm d, yyyy", "ddd d mmm yyyy", "mmm d, yyyy ddd", "yyyymmmdd"] {
+                let text = format_date(dt, fmt);
+                // A short month ending in a number ("Thg 1") glued to the day is ambiguous
+                // ("Thg 118": January 18 or November 8): nothing can read it back.
+                if fmt == "yyyymmmdd" && l.months_short.iter().any(|n| n.ends_with(|c: char| c.is_ascii_digit())) {
+                    continue;
+                }
+                if parse_date(&text, fmt).map(|p| (p.y, p.m, p.d)) != Some((2026, m, 18)) {
+                    bad.push(format!("{} forms {fmt}: {text:?}", l.code));
+                }
+                let script = format!("var d = util.scand('{fmt}', {text:?}); event.value = d ? util.printd('yyyy-mm-dd', d) : 'null';");
+                let o = run(&script, &Event::field("Format", "date", ""), &doc, &[], &[], Limits::default());
+                if o.value != format!("2026-{m:02}-18") {
+                    bad.push(format!("{} scand {fmt}: {text:?} -> {:?} {:?}", l.code, o.value, o.error));
+                }
+            }
+        }
+    }
+    use_form_date_language("en");
+    assert!(bad.is_empty(), "{} failures:\n{}", bad.len(), bad.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
 }
