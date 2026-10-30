@@ -2997,6 +2997,29 @@ fn a_radio_button_sits_where_a_check_box_would() {
     }
 }
 
+/// A check box without a width is as wide as its box and caption, at least its minW, not the rest
+/// of its group: two choices side by side in a positioned radio group keep their own boxes.
+#[test]
+fn a_radio_choice_without_a_width_is_as_wide_as_its_content() {
+    let choice = |name: &str, x: &str, item: &str| {
+        format!(
+            r#"<field name="{name}" x="{x}" y="0mm" h="5.906mm" minW="20.32mm"><ui><checkButton shape="round"/></ui><caption reserve="-5.08mm"><value><text>{name}</text></value><para hAlign="center"/></caption><font typeface="Arial" size="10pt"/><items><text>{item}</text></items></field>"#
+        )
+    };
+    let body = format!(
+        r#"<subform name="body" layout="position" w="7.5in" h="1in"><exclGroup name="pick" x="0mm" y="0mm" w="40.64mm">{}{}</exclGroup></subform>"#,
+        choice("Yes", "0mm", "Y"),
+        choice("No", "20.308mm", "N"),
+    );
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+    let laid = widgets(&form.pages[0]);
+    let x = |name: &str| laid.iter().find(|w| w.name == name).map(|w| w.rect.x - 36.0).unwrap_or_else(|| panic!("no radio button {name}"));
+    let mm = 72.0 / 25.4;
+    // Each box sits at the right end of its own 20.32mm-wide choice.
+    assert!((x("Yes") - (20.32 * mm - 10.0)).abs() < 0.01, "Yes box at {} pt", x("Yes"));
+    assert!((x("No") - ((20.308 + 20.32) * mm - 10.0)).abs() < 0.01, "No box at {} pt", x("No"));
+}
+
 /// A caption without a reserve leaves room for the box at the size it is drawn, a box larger than
 /// its field shrinking to fit; and a field without a height is as tall as that caption drawn in
 /// all the box leaves, not at some narrower width.
