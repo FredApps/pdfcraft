@@ -69,6 +69,44 @@ fn form_dates_follow_the_date_language() {
     use_form_date_language("en");
 }
 
+/// An English weekday typed before the month fills the format's weekday, so a month name that
+/// the date language shares with a weekday (Italian, Spanish, Romanian and Albanian "mar") is
+/// still read as the month: "Tue 17 Mar 2026" read as "Tue 17 Tuesday 2026" (#5303).
+#[test]
+fn an_english_weekday_before_a_shared_month_name_reads_as_english() {
+    let _names = names_lock();
+    let doc = DocInfo { file_name: "form.pdf".into(), num_pages: 1, page: 0, info: Vec::new(), xfa: false };
+    let mar17 = DateTime { y: 2026, m: 3, d: 17, hh: 0, mm: 0, ss: 0 };
+    let mut bad = Vec::new();
+    for language in ["it", "es", "ro", "sq"] {
+        use_form_date_language(language);
+        let ddd_d_mmm = "ddd d mmm yyyy";
+        let typed = [
+            // What the language writes, then English, then English and localized mixed.
+            (ddd_d_mmm, format_date(mar17, ddd_d_mmm)),
+            (ddd_d_mmm, "Tue 17 Mar 2026".into()),
+            (ddd_d_mmm, "Tuesday 17 Mar 2026".into()),
+            (ddd_d_mmm, "tue 17 mar 2026".into()),
+            (ddd_d_mmm, format!("Tue 17 {}", format_date(mar17, "mmm yyyy"))),
+            (ddd_d_mmm, format!("{} 17 Mar 2026", format_date(mar17, "ddd"))),
+            ("mmm d yyyy ddd", "Mar 17 2026 Tue".into()),
+            ("dddd d mmmm yyyy", "Tuesday 17 March 2026".into()),
+        ];
+        for (fmt, text) in typed {
+            if parse_date(&text, fmt) != Some(mar17) {
+                bad.push(format!("{language} forms {fmt}: {text:?} -> {:?}", parse_date(&text, fmt)));
+            }
+            let script = format!("var d = util.scand('{fmt}', {text:?}); event.value = d ? util.printd('yyyy-mm-dd', d) : 'null';");
+            let o = run(&script, &Event::field("Format", "date", ""), &doc, &[], &[], Limits::default());
+            if o.value != "2026-03-17" {
+                bad.push(format!("{language} scand {fmt}: {text:?} -> {:?} {:?}", o.value, o.error));
+            }
+        }
+    }
+    use_form_date_language("en");
+    assert!(bad.is_empty(), "{}", bad.join("; "));
+}
+
 /// Every date language: what a date field writes reads back as the same date, for each date
 /// letter that writes a name, through the form path and through `util.scand`. Called from the
 /// one test, which owns the process-wide names.

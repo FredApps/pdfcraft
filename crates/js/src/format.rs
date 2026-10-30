@@ -159,7 +159,9 @@ pub fn set_date_names(months: [&'static str; 12], months_short: [&'static str; 1
 /// that doesn't continue a word, nor end in a digit that a number continues. A name may hold
 /// digits ("10月"), spaces ("tháng 10"), dots ("ม.ค.") or combining vowel signs, which a
 /// word-by-word reader would split (#5303). Where a weekday and a month share a name (Italian
-/// "mar"), the order of the format's name fields (`mmm`, `ddd`) decides.
+/// "mar"), the order of the format's name fields (`mmm`, `ddd`) decides. English names are
+/// found too, so that one typed ("Tue" before "Mar") fills its field of the format as a
+/// localized one does.
 fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
     const EN: [&[&str]; 4] = [&MONTHS, &MONTHS, &DAYS, &DAYS];
     // No date is this long: hostile text is left as it is rather than scanned name by name.
@@ -168,13 +170,14 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
     }
     let chars: Vec<char> = text.chars().collect();
     let lower = |c: char| c.to_lowercase().collect::<String>();
+    let typed_english: [&[&str]; 4] = [&ENGLISH.0, &ENGLISH.1, &ENGLISH.2, &ENGLISH.3];
     // Each name as lower-case chars, whether it is a month, and its English name.
     let mut names: Vec<(Vec<String>, bool, &str)> = Vec::new();
-    for (k, (list, en)) in lists.iter().zip(EN).enumerate() {
+    for (k, (list, en)) in lists.into_iter().zip(EN).chain(typed_english.into_iter().zip(EN)).enumerate() {
         for (name, english) in list.iter().zip(en.iter()) {
             let n: Vec<String> = name.chars().map(lower).collect();
             if !n.is_empty() && n.len() <= MAX_NAME_CHARS {
-                names.push((n, k < 2, english));
+                names.push((n, k % 4 < 2, english));
             }
         }
     }
