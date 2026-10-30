@@ -59,12 +59,14 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
   downsampling it to JPEG.
   - **Downsampling:** one whose effective resolution is above `above_ppi` is averaged down to
     `target_ppi`: each new pixel takes the sample covering more of its area, and the dark one on a
-    tie, so a dark line half a new pixel wide stays: black in grey and the painted part of an image
-    mask (a 0, or a 1 with an inverting decode array). Only images whose dark sample is known so
-    are averaged: `DeviceGray` (grey and RGB packed to one bit among them) and image masks, with no
-    decode array or one of two different numbers, and not drawn or listed where `/DefaultGray` or
-    `/DefaultRGB` is or may be in force. Not a separation, a DeviceN, calibrated or ICC grey, or an
-    indexed image, whose palette isn't read. Not one with a soft mask, whose own size would have to
+    tie, so a dark line half a new pixel wide stays: black in grey, the painted part of an image
+    mask (a 0, or a 1 with an inverting decode array), and the darker of an indexed image's two
+    palette entries. Only images whose dark sample is known so are averaged: `DeviceGray` (grey and
+    RGB packed to one bit among them), image masks, and indexed images over `DeviceGray` or
+    `DeviceRGB`, whose palette is read (Rec. 601 luma for RGB), with no decode array or one of two
+    different numbers, and not drawn or listed where `/DefaultGray` or `/DefaultRGB` is or may be
+    in force. Not a separation or a DeviceN, whose tint transform isn't read, calibrated or ICC
+    grey, or an indexed image over another base or whose two entries look alike. Not one with a soft mask, whose own size would have to
     follow; not a halftone or a dither, most of whose new pixels would cover both black and white,
     so that taking the sample covering more would turn its tones solid (a 50% screen black, a 25%
     one white), nor one with a square of four new pixels that each would, as a small screened

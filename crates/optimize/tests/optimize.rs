@@ -3445,10 +3445,12 @@ fn lzw_streams_that_cannot_be_read_or_are_not_asked_for_stay_unchanged() {
     assert_eq!(stream(&doc, c).decoded_strict().unwrap(), ops);
 }
 
-/// Unknown palette polarity is never guessed. Both palette orders and Decode directions
-/// retain the original thin rule and exact samples through a full save and render.
+/// An indexed image's palette says which sample is dark, so a thin rule survives averaging as it does
+/// in grey: with the palette either way round, and the decode array either way, the averaged image
+/// holds the averaged DeviceGray one's samples (flipped where its samples are), and looks the same
+/// through a full save and render.
 #[test]
-fn indexed_thin_rules_keep_their_samples_for_both_palette_orders_and_decodes() {
+fn indexed_thin_rules_survive_averaging_for_both_palette_orders_and_decodes() {
     let (w, h) = (1200u32, 480u32);
     let stride = (w as usize).div_ceil(8);
     let mut gray_data = vec![0xFF; stride * h as usize];
@@ -3460,6 +3462,7 @@ fn indexed_thin_rules_keep_their_samples_for_both_palette_orders_and_decodes() {
     page(&mut gray, &[("Im", gray_image)], "q 144 0 0 57.6 20 600 cm /Im Do Q");
     let gray_render = render(&gray);
     optimize(&mut gray, &Settings::default()).unwrap();
+    let gray_after = render(&Document::open(Arc::new(write_full(&gray, &SaveOptions::default()).unwrap())).unwrap());
     let gray_stream = stream(&gray, gray_image);
     let gray_samples = gray.decoded_image(&gray_stream).unwrap();
     assert_eq!((gray_stream.dict.int(b"Width"), gray_stream.dict.int(b"Height")), (Some(600), Some(240)));
@@ -3491,10 +3494,12 @@ fn indexed_thin_rules_keep_their_samples_for_both_palette_orders_and_decodes() {
             assert_eq!(before, gray_render, "the palette image is visually identical to DeviceGray");
             optimize(&mut doc, &Settings::default()).unwrap();
             let s = stream(&doc, image);
-            assert_eq!((s.dict.int(b"Width"), s.dict.int(b"Height")), (Some(w.into()), Some(h.into())));
-            assert_eq!(doc.decoded_image(&s).unwrap(), data);
+            assert_eq!((s.dict.int(b"Width"), s.dict.int(b"Height")), (Some(600), Some(240)), "white-first={white_first}, inverted={inverted}");
+            // The rows are 600 samples, whole bytes: flipping each byte flips each sample.
+            let expected: Vec<u8> = gray_samples.iter().map(|b| if white_first != inverted { !b } else { *b }).collect();
+            assert_eq!(doc.decoded_image(&s).unwrap(), expected, "white-first={white_first}, inverted={inverted}: the rule is dark");
             let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
-            assert_eq!(render(&saved), before, "palette white-first={white_first}, inverted={inverted}");
+            assert!(render(&saved) == gray_after, "palette white-first={white_first}, inverted={inverted}");
         }
     }
 }
