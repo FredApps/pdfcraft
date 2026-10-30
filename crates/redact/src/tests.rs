@@ -519,13 +519,19 @@ fn two_pages_one_resource_dictionary(inherited: bool, again: bool) -> Document {
     ])
 }
 
-/// The samples of the image a page's (possibly inherited) resources name `name`.
+/// The samples of the image a page's (possibly inherited) resources name `name`, decoded through
+/// its image codec too (`Document::decoded_image`).
 fn named_image(doc: &Document, page: usize, name: &[u8]) -> Option<Vec<u8>> {
+    named_stream(doc, page, name).and_then(|s| doc.decoded_image(&s).ok())
+}
+
+/// The image a page's (possibly inherited) resources name `name`.
+fn named_stream(doc: &Document, page: usize, name: &[u8]) -> Option<Stream> {
     let p = pdfcraft_model::pages(doc).swap_remove(page);
     let res = doc.resolve(p.dict.get(b"Resources")?).as_dict().cloned()?;
     let xo = doc.resolve(res.get(b"XObject")?).as_dict().cloned()?;
     match &*doc.get(xo.get(name)?.as_ref()?) {
-        Object::Stream(s) => s.decoded().ok(),
+        Object::Stream(s) => Some(s.clone()),
         _ => None,
     }
 }
@@ -833,7 +839,8 @@ fn a_jbig2_image_that_cannot_be_cleared_for_certain_is_removed_whole() {
 
 /// A scan stored as JBIG2 symbols, with globals, keeps every pixel outside the area once it is
 /// redacted and saved, and the pixels under it are cleared; neither its JBIG2 code nor its globals,
-/// which no other image uses, stay in the file.
+/// which no other image uses, stay in the file. The cleared copy is coded afresh as JBIG2, smaller
+/// than Flate, and refers to no globals.
 #[test]
 fn a_redacted_jbig2_scan_keeps_neither_its_code_nor_its_globals() {
     const LETTERS: [[&str; 7]; 3] = [
@@ -854,6 +861,7 @@ fn a_redacted_jbig2_scan_keeps_neither_its_code_nor_its_globals() {
         }
     }
     let coded = pdfcraft_filters::encode_jbig2(&bits, w as u32, h as u32).unwrap();
+    let original = coded.clone();
     assert!(coded.len() < pdfcraft_filters::encode_jbig2_generic(&bits, w as u32, h as u32).unwrap().len(), "symbol coded");
     let dict = format!(
         "/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 1 /ColorSpace /DeviceGray /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals 8 0 R >>"
@@ -877,10 +885,108 @@ fn a_redacted_jbig2_scan_keeps_neither_its_code_nor_its_globals() {
     let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
     assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(cleared));
     assert_no_secret(&doc, b"LEAK_GLOBALS");
+    let copy = named_stream(&saved, 0, b"PCRedacted1").unwrap();
+    assert_eq!(copy.dict.name(b"Filter"), Some(&b"JBIG2Decode"[..]));
+    assert!(!copy.dict.contains(b"DecodeParms"), "the copy refers to no globals");
+    let flate = pdfcraft_filters::encode_flate(&named_image(&saved, 0, b"PCRedacted1").unwrap());
+    assert!(copy.raw.len() < flate.len(), "JBIG2 {} bytes, Flate {}", copy.raw.len(), flate.len());
     for (r, object) in saved.scan_objects() {
         if let Object::Stream(s) = &*object {
-            assert_ne!(s.dict.name(b"Filter"), Some(&b"JBIG2Decode"[..]), "the JBIG2 image stays as {r:?}");
+            assert_ne!(&s.raw[..], &original[..], "the original JBIG2 code stays as {r:?}");
         }
+    }
+}
+
+/// A cleared one-bit image of one component, a scan as a rule, is stored as CCITT Group 4 when
+/// that is smaller than Flate, whatever it was stored as (Flate here), and never as JBIG2 unless it
+/// was JBIG2; an eight-bit image stays Flate. The copy decodes to the cleared samples.
+#[test]
+fn a_cleared_black_and_white_scan_is_stored_as_group_4() {
+    // 800 × 200: lines of word-sized dark blocks 14 rows tall, their edges ragged by a sample from
+    // row to row, as a scan's are; Group 4 codes such rows from the row above.
+    let (w, h) = (800usize, 200usize);
+    let stride = w / 8;
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let mut bits = vec![0xFFu8; stride * h];
+    for top in (3..h - 14).step_by(20) {
+        let mut x = 4;
+        while x + 70 < w {
+            let len = 20 + (next() % 40) as usize;
+            for y in top..top + 14 {
+                let (left, right) = (x + (next() % 2) as usize, x + len - (next() % 2) as usize);
+                for xx in left..right {
+                    bits[y * stride + xx / 8] &= !(0x80 >> (xx % 8));
+                }
+            }
+            x += len + 6 + (next() % 6) as usize;
+        }
+    }
+    let g4 = pdfcraft_filters::encode_g4(&bits, w as u32, h as u32).unwrap();
+    assert!(g4.len() < pdfcraft_filters::encode_flate(&bits).len(), "Group 4 is smaller than Flate here");
+    let grey: Vec<u8> = (0..w * h).map(|i| (i % 251) as u8).collect();
+    for (dict, data, filter) in [
+        (
+            format!("/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 1 /ColorSpace /DeviceGray /Filter /FlateDecode"),
+            pdfcraft_filters::encode_flate(&bits),
+            &b"CCITTFaxDecode"[..],
+        ),
+        (
+            format!("/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter /FlateDecode"),
+            pdfcraft_filters::encode_flate(&grey),
+            &b"FlateDecode"[..],
+        ),
+    ] {
+        let mut doc = one_page(b"q 200 0 0 50 0 100 cm /Im Do Q", "/XObject << /Im 7 0 R >>", vec![stream(&dict, data)]);
+        // The left quarter of the top half.
+        mark(&mut doc, 0, &[[0.0, 125.0, 50.0, 150.0]], "");
+        assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1, "{dict}");
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        let copy = named_stream(&saved, 0, b"PCRedacted1").unwrap();
+        assert_eq!(copy.dict.name(b"Filter"), Some(filter), "{dict}");
+        // Covered: rows 0 to 99 (y 150 down to 125, a quarter point a row), samples 0 to 199.
+        let mut expected = if filter == b"FlateDecode" { grey.clone() } else { bits.clone() };
+        for y in 0..100 {
+            for x in 0..200 {
+                if filter == b"FlateDecode" {
+                    expected[y * w + x] = 0;
+                } else {
+                    expected[y * stride + x / 8] &= !(0x80 >> (x % 8));
+                }
+            }
+        }
+        assert_eq!(named_image(&saved, 0, b"PCRedacted1").unwrap(), expected, "{dict}");
+    }
+}
+
+/// A cleared one-bit image is stored as the smallest stream, its dictionary counted: a tiny one,
+/// whose Group 4 code is shorter than Flate's but whose `/DecodeParms` aren't, stays Flate. Rows
+/// wider than Group 4 codes (`MAX_G4_COLUMNS`) stay Flate too, and still clear.
+#[test]
+fn a_cleared_image_group_4_wouldnt_shrink_stays_flate() {
+    let wide = pdfcraft_filters::MAX_G4_COLUMNS as usize + 1;
+    for (w, h) in [(3usize, 2usize), (wide, 2)] {
+        let stride = w.div_ceil(8);
+        let dict = format!("/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 1 /ColorSpace /DeviceGray /Filter /FlateDecode");
+        let mut doc = one_page(
+            b"q 200 0 0 20 0 100 cm /Im Do Q",
+            "/XObject << /Im 7 0 R >>",
+            vec![stream(&dict, pdfcraft_filters::encode_flate(&vec![0xFF; stride * h]))],
+        );
+        // The top row's left half.
+        mark(&mut doc, 0, &[[0.0, 112.0, 99.0, 118.0]], "");
+        assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1, "{w} × {h}");
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(named_stream(&saved, 0, b"PCRedacted1").unwrap().dict.name(b"Filter"), Some(&b"FlateDecode"[..]), "{w} × {h}");
+        let samples = named_image(&saved, 0, b"PCRedacted1").unwrap();
+        let sample = |x: usize| samples.get(x / 8).is_some_and(|b| b & (0x80 >> (x % 8)) != 0);
+        assert!(!sample(0) && sample(w - 1), "{w} × {h}: the top row's first sample is cleared and its last kept");
+        assert!(samples.get(stride..).is_some_and(|row| row.iter().all(|b| *b == 0xFF)), "{w} × {h}: the bottom row is kept");
     }
 }
 
@@ -2525,7 +2631,8 @@ fn assert_no_secret(doc: &Document, secret: &[u8]) {
         pdfcraft_cos::serialize(&object, &mut bytes);
         assert!(!bytes.windows(secret.len()).any(|w| w == secret), "secret remains in object {r:?}");
         if let Object::Stream(s) = &*object {
-            let data = s.decoded().unwrap();
+            // Image codecs, a cleared scan coded as Group 4 or JBIG2, decode through the document.
+            let data = s.decoded().or_else(|_| saved.decoded_image(s)).unwrap();
             assert!(!data.windows(secret.len()).any(|w| w == secret), "secret remains in stream {r:?}");
         }
     }
