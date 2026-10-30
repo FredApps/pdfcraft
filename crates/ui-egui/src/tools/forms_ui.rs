@@ -326,10 +326,11 @@ struct ComboEditor<'a> {
     zoom: f32,
     index: usize,
     interaction_rect: Rect,
+    ruler_interaction: bool,
 }
 
 fn combo_editor(ctx: &egui::Context, view: &mut DocView, editor: ComboEditor<'_>) {
-    let ComboEditor { form, field: f, widget: w, rect, zoom, index: widget, interaction_rect } = editor;
+    let ComboEditor { form, field: f, widget: w, rect, zoom, index: widget, interaction_rect, ruler_interaction } = editor;
     let mut enter = false;
     egui::Area::new(egui::Id::unique(("form-editor", view.id.0)))
         .fade_in(false)
@@ -352,6 +353,10 @@ fn combo_editor(ctx: &egui::Context, view: &mut DocView, editor: ComboEditor<'_>
                 .id(egui::Id::unique(("form-field", view.id.0, &f.name, widget)));
             // The form field's own logical name; not a visual/preordered label.
             let r = ui.add_sized(rect.size(), te).accessible_name(f.name.clone());
+            if ruler_interaction && r.lost_focus() {
+                r.request_focus();
+                fx.had_focus = true;
+            }
             if std::mem::take(&mut fx.request_focus) {
                 r.request_focus();
                 // Entered with Tab: typing replaces the value.
@@ -887,7 +892,11 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
             // An editable combo box has a text box over the field as well as its list (ISO
             // 32000-2 Table 233, Edit).
             if editable_combo(f) {
-                combo_editor(ctx, view, ComboEditor { form, field: f, widget: w, rect, zoom, index: focus.widget, interaction_rect });
+                combo_editor(
+                    ctx,
+                    view,
+                    ComboEditor { form, field: f, widget: w, rect, zoom, index: focus.widget, interaction_rect, ruler_interaction },
+                );
             }
             let resp = egui::Area::new(egui::Id::unique(("form-choices", view.id.0)))
                 .order(egui::Order::Foreground)
