@@ -355,3 +355,36 @@ fn a_short_weekday_typed_without_its_dot_is_the_weekday() {
     use_form_date_language("en");
     assert!(bad.is_empty(), "{}", bad.join("; "));
 }
+
+/// A weekday left out of a format with one ("17 mar 2026" for "ddd d mmm yyyy") lets a name the
+/// date language shares between a weekday and a month be the month: Italian, Spanish and
+/// Albanian "mar" (Tuesday, March) and Albanian "sht" (Saturday, September) were read as the
+/// weekday, leaving no month (#5303). Typed weekdays still go first.
+#[test]
+fn a_shared_name_is_the_month_when_the_weekday_is_left_out() {
+    let _names = names_lock();
+    let mut bad = Vec::new();
+    let cases = [
+        ("it", "ddd d mmm yyyy", "17 Mar 2026", (2026, 3, 17)),
+        ("es", "ddd d mmm yyyy", "17 Mar 2026", (2026, 3, 17)),
+        ("sq", "ddd d mmm yyyy", "17 Mar 2026", (2026, 3, 17)),
+        ("it", "ddd d mmm yyyy", "17 mar 2026", (2026, 3, 17)),
+        ("it", "dddd, mmmm d, yyyy", "mar 17, 2026", (2026, 3, 17)),
+        ("it", "dddd, mmm d, yyyy", "mar 17 2026", (2026, 3, 17)),
+        ("sq", "ddd d mmm yyyy", "5 sht 2026", (2026, 9, 5)),
+        ("it", "ddd d mmm yyyy", "mar 17 Mar 2026", (2026, 3, 17)),
+        ("it", "ddd d mmm yyyy", "mar 17 mar 2026", (2026, 3, 17)),
+    ];
+    for (language, fmt, text, want) in cases {
+        use_form_date_language(language);
+        let read = parse_date(text, fmt).map(|d| (d.y, d.m, d.d));
+        if read != Some(want) {
+            bad.push(format!("{language} forms {fmt}: {text:?} -> {read:?}"));
+        }
+        if keystroke(&Format::Date(fmt.into()), "date", text).is_err() {
+            bad.push(format!("{language} keystroke {fmt}: {text:?} refused"));
+        }
+    }
+    use_form_date_language("en");
+    assert!(bad.is_empty(), "{}", bad.join("; "));
+}

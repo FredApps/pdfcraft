@@ -344,7 +344,18 @@ fn order(fmt: &str) -> Vec<Part> {
 /// separators, month names, two-digit years). `None` when it isn't a valid date.
 pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     let names = date_names();
-    let english = english_names(text, fmt, [&names.months, &names.months_short, &names.days, &names.days_short]);
+    let lists: [&[&str]; 4] = [&names.months, &names.months_short, &names.days, &names.days_short];
+    // Weekdays are shown, not typed (see `order`): where the format has one but none was typed, a
+    // name the language shares between a weekday and a month (Italian "mar") is the month, as
+    // the names are read again with no weekday expected (#5303).
+    read_date(&english_names(text, fmt, lists), fmt, &names).or_else(|| {
+        let no_weekday = fmt.replace("dddd", " ").replace("ddd", " ");
+        (no_weekday != fmt).then(|| read_date(&english_names(text, &no_weekday, lists), fmt, &names)).flatten()
+    })
+}
+
+/// [`parse_date`] of `english`, typed text whose month and weekday names are English.
+fn read_date(english: &str, fmt: &str, names: &DateNames) -> Option<DateTime> {
     let t = english.trim();
     if t.is_empty() {
         return None;
@@ -366,7 +377,7 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
         }
         if cur.starts_with(|c: char| c.is_ascii_digit()) {
             nums.push_back(std::mem::take(cur));
-        } else if let Some(m) = month_named(cur, &names) {
+        } else if let Some(m) = month_named(cur, names) {
             *month = Some(m);
         }
         cur.clear();
