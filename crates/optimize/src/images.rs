@@ -802,6 +802,9 @@ fn one_bit(doc: &Document, s: &Stream, pack: bool, defaults: bool) -> Option<(Ve
         let len = stride.checked_mul(hu)?;
         let max = match s.filters().last() {
             Some((pdfcraft_filters::Filter::CcittFax, _)) => wu.checked_mul(hu)?.checked_add(hu.checked_mul(4)?)?.checked_add(4096)?,
+            // `decoded_image_within` reads JBIG2 too, but not for this yet: a resampled JBIG2 image
+            // would come out Flate under Retain, and nothing weighs JBIG2 again against it.
+            Some((pdfcraft_filters::Filter::Jbig2, _)) => return None,
             _ => allowance(len, h)?,
         };
         let mut data = doc.decoded_image_within(s, max).ok()?;

@@ -173,6 +173,64 @@ fn fax_images_decode_with_their_parameters() {
     assert!(behind(&[Object::Int(5), fax], &[null, own], coded.clone()).is_err(), "a /Filter entry that isn't a name");
 }
 
+/// A JBIG2 image reads through its decoder, behind other filters too, with the `/JBIG2Globals` of
+/// its own `/DecodeParms` (a dictionary or its place in an array, /Crypt counting, by reference
+/// too): globals that can't be read are an error, and ones at another filter's place aren't its
+/// own, nor are those of a lone dictionary when other filters come first. Its page has to be its
+/// /Width × /Height, and fit the bound.
+#[test]
+fn jbig2_images_decode_with_their_globals() {
+    // 10 × 3: the first five samples of each row white, the rest black.
+    let bits = [0b1111_1000, 0, 0b1111_1000, 0, 0b1111_1000, 0];
+    let coded = pdfcraft_filters::encode_jbig2_generic(&bits, 10, 3).unwrap();
+    let hex = coded.iter().map(|b| format!("{b:02x}")).chain([">".to_string()]).collect::<String>().into_bytes();
+    let mut doc = Document::new_empty();
+    // An extension segment (ISO/IEC 14492 7.4.14), which a decoder skips, Flate-encoded; and data
+    // that isn't JBIG2.
+    let globals = |doc: &mut Document, data: &[u8]| {
+        let mut d = Dict::new();
+        d.set(b"Filter".to_vec(), Object::name("FlateDecode"));
+        let globals = doc.add(Object::Stream(Stream::from_raw(d, pdfcraft_filters::encode_flate(data))));
+        let mut parms = Dict::new();
+        parms.set(b"JBIG2Globals".to_vec(), Object::Ref(globals));
+        Object::Dict(parms)
+    };
+    let (good, bad) = (globals(&mut doc, &[0, 0, 0, 0, 0x3E, 0, 0, 0, 0, 0, 4, 0, 0, 0, 1]), globals(&mut doc, b"not JBIG2"));
+    let indirect = Object::Ref(doc.add(bad.clone()));
+    let image = |filters: &[&str], parms: Option<Object>, data: &[u8], (width, height): (i64, i64), max: usize| {
+        let mut d = Dict::new();
+        d.set(b"Width".to_vec(), Object::Int(width));
+        d.set(b"Height".to_vec(), Object::Int(height));
+        d.set(b"Filter".to_vec(), Object::Array(filters.iter().map(|f| Object::name(f)).collect()));
+        if let Some(p) = parms {
+            d.set(b"DecodeParms".to_vec(), p);
+        }
+        doc.decoded_image_within(&Stream::from_raw(d, data.to_vec()), max)
+    };
+    let jbig2 = ["JBIG2Decode"];
+    let full = (10, 3);
+    assert_eq!(image(&jbig2, None, &coded, full, MAX_DECODED).unwrap(), bits);
+    assert_eq!(image(&jbig2, Some(good.clone()), &coded, full, MAX_DECODED).unwrap(), bits, "globals it skips");
+    for parms in [bad.clone(), Object::Array(vec![bad.clone()]), indirect.clone(), Object::Array(vec![indirect])] {
+        let e = image(&jbig2, Some(parms.clone()), &coded, full, MAX_DECODED).unwrap_err();
+        assert!(e.to_string().contains("JBIG2"), "{parms:?}: {e}");
+    }
+    let behind = ["ASCIIHexDecode", "JBIG2Decode"];
+    assert_eq!(image(&behind, None, &hex, full, MAX_DECODED).unwrap(), bits, "behind ASCIIHexDecode");
+    assert!(image(&behind, Some(Object::Array(vec![Object::Null, bad.clone()])), &hex, full, MAX_DECODED).is_err(), "its own globals");
+    assert_eq!(image(&behind, Some(Object::Array(vec![bad.clone(), Object::Null])), &hex, full, MAX_DECODED).unwrap(), bits, "another's");
+    assert_eq!(image(&behind, Some(bad.clone()), &hex, full, MAX_DECODED).unwrap(), bits, "a lone dictionary, the first filter's");
+    let after_crypt = ["Crypt", "JBIG2Decode"];
+    assert!(image(&after_crypt, Some(Object::Array(vec![Object::Null, bad.clone()])), &coded, full, MAX_DECODED).is_err(), "after /Crypt");
+    assert_eq!(image(&after_crypt, Some(Object::Array(vec![bad, Object::Null])), &coded, full, MAX_DECODED).unwrap(), bits, "/Crypt's");
+
+    for size in [(11, 3), (9, 3), (10, 2), (10, 4)] {
+        assert!(image(&jbig2, None, &coded, size, MAX_DECODED).is_err(), "a page other than {size:?}");
+    }
+    assert_eq!(image(&jbig2, None, &coded, full, 6).unwrap(), bits, "the page within the bound");
+    assert!(image(&jbig2, None, &coded, full, 5).is_err(), "the page past the bound");
+}
+
 #[test]
 fn a_missing_file_id_is_derived_from_the_encryption_seed() {
     let mut doc = Document::new_empty();

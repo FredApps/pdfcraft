@@ -85,7 +85,8 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
   - Apart from the downsampling it is lossless: the samples keep their meaning, so the colour
     space, decode array and `/Mask` stay, but for packed RGB, which becomes grey with one decode
     pair. Group 4 wins on scans, whose ragged edges defeat Flate; on clean computer-drawn 1-bit
-    art Flate can be smaller. Not yet: inline images, an image's own `/SMask` or `/Mask`
+    art Flate can be smaller. Not yet: JBIG2 images themselves (left as they are, neither
+    downsampled nor stored again, though `Document::decoded_image` reads them), inline images, an image's own `/SMask` or `/Mask`
     image (only images drawn on a page are visited), and Group 4 for rows wider than 32,767
     samples.
 

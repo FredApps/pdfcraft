@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 
 use crate::CosError;
-use crate::object::{Dict, MAX_DECODED, ObjRef, Object, Stream};
+use crate::object::{Dict, MAX_DECODED, MAX_JBIG2_GLOBALS, ObjRef, Object, Stream};
 use crate::parser::{EndstreamIndex, Lexer, is_whitespace, parse_indirect, parse_indirect_shared};
 
 mod objects;
