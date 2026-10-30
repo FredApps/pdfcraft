@@ -424,3 +424,30 @@ fn turkish_names_typed_in_capitals_are_read() {
     }
     assert!(bad.is_empty(), "{}", bad.join("; "));
 }
+
+/// #5464 review: Greek names typed in capitals end in a capital Σ, which is the final ς of the
+/// name ("ΙΑΝΟΥΆΡΙΟΣ" for "Ιανουάριος"); they read as they did before names were folded.
+#[test]
+fn greek_names_typed_in_capitals_are_read() {
+    let _names = names_lock();
+    use_form_date_language("el");
+    let mut bad = Vec::new();
+    for (fmt, text, want) in [
+        ("d mmmm yyyy", "1 ΙΑΝΟΥΆΡΙΟΣ 2026", (2026, 1, 1)),
+        ("d mmmm yyyy", "1 Ιανουάριος 2026", (2026, 1, 1)),
+        ("d mmmm yyyy", "1 ιανουάριοσ 2026", (2026, 1, 1)),
+        ("mmmm d, yyyy", "ΜΆΙΟΣ 5, 2026", (2026, 5, 5)),
+        ("dddd, mmmm d, yyyy", "FRIDAY, ΙΑΝΟΥΆΡΙΟΣ 2, 2026", (2026, 1, 2)),
+    ] {
+        let read = parse_date(text, fmt).map(|d| (d.y, d.m, d.d));
+        if read != Some(want) {
+            bad.push(format!("forms {fmt}: {text:?} -> {read:?}"));
+        }
+        let (y, m, d) = want;
+        let got = scanned(fmt, text);
+        if got != format!("{y:04}-{m:02}-{d:02}") {
+            bad.push(format!("scand {fmt}: {text:?} -> {got}"));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("; "));
+}

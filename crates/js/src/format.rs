@@ -250,10 +250,13 @@ fn english_names(text: &str, fmt: &str, lists: [&[&str]; 4]) -> String {
 /// `c` as names are compared: lower case, with the capital I and the Turkish dotted and dotless
 /// i all "i", and a combining dot above (U+0307) dropped, so that "EKİM", "SALI" and "MAYIS" are
 /// Turkish "Ekim", "Salı" and "Mayıs", which lower-casing alone makes "ekim" with a dotted i,
-/// "sali" and "mayis" (#5303). One piece for each char, so positions in the text stay aligned.
+/// "sali" and "mayis" (#5303). The Greek final sigma is a sigma, since a capital Σ, which
+/// lower-cases to σ on its own, ends "ΙΑΝΟΥΆΡΙΟΣ" for "Ιανουάριος". One piece for each char, so
+/// positions in the text stay aligned.
 fn fold(c: char) -> String {
     match c {
         'I' | 'ı' | 'İ' => "i".to_string(),
+        'ς' => "σ".to_string(),
         _ => c.to_lowercase().filter(|&l| l != '\u{307}').collect(),
     }
 }
