@@ -3566,6 +3566,73 @@ fn an_indexed_palette_is_read_by_the_luma_of_its_colours() {
     assert_eq!(optimized("NotIndexed").0, Some(1200));
 }
 
+/// What is averaged, by how the image is spelled. A family or a base by reference, or a device base
+/// alone in an array, is the same colour space. `/I`, an inline abbreviation, and a real `hival`
+/// aren't one, and neither is a table too large to be a palette, which images share and which
+/// would be read for each. A colour key can hide the dark sample a tie goes to, so a thin rule of
+/// the other would be lost, in grey too; a stencil `/Mask` doesn't.
+#[test]
+fn an_indexed_image_is_averaged_only_in_a_spelling_it_can_read() {
+    let (w, h) = (1200u32, 480u32);
+    let stride = (w as usize).div_ceil(8);
+    let mut data = vec![0xFF; stride * h as usize];
+    for y in 0..h as usize {
+        data[y * stride + 101 / 8] &= !(0x80 >> (101 % 8));
+    }
+    let table = || Object::String(pdfcraft_cos::PdfString::literal(vec![0, 0, 0, 255, 255, 255]));
+    let indexed = |family: Object, base: Object, hival: Object, table: Object| Object::Array(vec![family, base, hival, table]);
+    let rgb = || Object::name("DeviceRGB");
+    let plain = || indexed(Object::name("Indexed"), rgb(), 1.into(), table());
+    let width = |make: &dyn Fn(&mut Document) -> Vec<(&'static str, Object)>| {
+        let mut doc = Document::new_empty();
+        let mut entries = vec![("BitsPerComponent", Object::Int(1))];
+        entries.extend(make(&mut doc));
+        let image = mono_image(&mut doc, w, h, &data, None, &entries);
+        page(&mut doc, &[("Im", image)], "q 144 0 0 57.6 20 600 cm /Im Do Q");
+        optimize(&mut doc, &Settings::default()).unwrap();
+        stream(&doc, image).dict.int(b"Width")
+    };
+    let averaged = Some(600);
+    let kept = Some(1200);
+    assert_eq!(width(&|_| vec![("ColorSpace", plain())]), averaged, "direct");
+    assert_eq!(
+        width(&|doc: &mut Document| {
+            let family = doc.add(Object::name("Indexed"));
+            vec![("ColorSpace", indexed(Object::Ref(family), rgb(), 1.into(), table()))]
+        }),
+        averaged,
+        "the family by reference"
+    );
+    let base = Object::Array(vec![rgb()]);
+    assert_eq!(width(&|_| vec![("ColorSpace", indexed(Object::name("Indexed"), base.clone(), 1.into(), table()))]), averaged, "the base in an array");
+    assert_eq!(width(&|_| vec![("ColorSpace", indexed(Object::name("I"), rgb(), 1.into(), table()))]), kept, "an inline abbreviation");
+    assert_eq!(width(&|_| vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), Object::Real(1.0), table()))]), kept, "a real hival");
+    let long = Object::String(pdfcraft_cos::PdfString::literal([vec![0, 0, 0, 255, 255, 255], vec![0; 4097]].concat()));
+    assert_eq!(width(&|_| vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), 1.into(), long.clone()))]), kept, "a string past a palette");
+    let mut d = Dict::new();
+    d.set(b"Filter".to_vec(), Object::name("ASCIIHexDecode"));
+    let hex: Vec<u8> = b"000000FFFFFF".iter().copied().chain(std::iter::repeat_n(b' ', 16385)).chain(*b">").collect();
+    assert_eq!(
+        width(&|doc: &mut Document| {
+            let large = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(d.clone(), hex.clone())));
+            vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), 1.into(), Object::Ref(large)))]
+        }),
+        kept,
+        "a stream too large to be read for each image, whatever it decodes to"
+    );
+    let key = || Object::Array(vec![0.into(), 0.into()]);
+    assert_eq!(width(&|_| vec![("ColorSpace", plain()), ("Mask", key())]), kept, "a colour key, indexed");
+    assert_eq!(width(&|_| vec![("ColorSpace", Object::name("DeviceGray")), ("Mask", key())]), kept, "a colour key, grey");
+    assert_eq!(
+        width(&|doc: &mut Document| {
+            let key = doc.add(key());
+            vec![("ColorSpace", plain()), ("Mask", Object::Ref(key))]
+        }),
+        kept,
+        "a colour key by reference"
+    );
+}
+
 /// White margins must not hide a small screened photograph from the tone guard.
 #[test]
 fn mixed_text_and_small_halftone_regions_keep_their_tones_with_wide_white_margins() {
