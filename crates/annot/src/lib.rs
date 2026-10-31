@@ -42,8 +42,8 @@ pub use modify::{
     set_fill, set_font, set_font_size, set_locked, set_marked, set_points, set_rect, set_review_state, set_style, with_replies_and_popups,
 };
 pub use types::{
-    AnnotFont, AttachIcon, FillMark, LineEnding, Markup, Meta, NOTE_SIZE, NewAnnotation, NoteIcon, OverlayFont, OverlayLook, ReviewState, Rgb,
-    Shape, StampGroup, StampKind, Style, StyleChange, TextReplacement, rect_quad,
+    AnnotFont, AttachIcon, FillMark, LineEnding, Markup, Meta, NOTE_SIZE, NewAnnotation, NoteIcon, OverlayFont, OverlayLook, ReviewState, Rgb, Shape,
+    StampGroup, StampKind, Style, StyleChange, TextReplacement, rect_quad,
 };
 
 pub mod appearance;

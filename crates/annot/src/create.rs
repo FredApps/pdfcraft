@@ -384,10 +384,7 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             } else {
                 AnnotFont::Helvetica
             };
-            d.set(
-                b"DA".to_vec(),
-                PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(r), n(g), n(b), font.resource(), n(size)).into_bytes()),
-            );
+            d.set(b"DA".to_vec(), PdfString::literal(format!("{} {} {} rg /{} {} Tf", n(r), n(g), n(b), font.resource(), n(size)).into_bytes()));
             d.set(b"Q".to_vec(), Object::Int(0));
             if let Some(f) = style.fill {
                 d.set(b"C".to_vec(), rgb(f));

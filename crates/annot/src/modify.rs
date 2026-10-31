@@ -5,8 +5,8 @@ use super::draw::{draw_appearance, redraw_or_restore, set_appearance};
 use super::info::{line_endings_of, text_value};
 use super::lookup::{annot_dict, annot_ref, annotation_flags, annots, page_ref, set_annots};
 use super::types::{
-    AnnotFont, FLAG_HIDDEN, FLAG_LOCKED, FLAG_NO_ROTATE, FLAG_NO_ZOOM, FLAG_PRINT, LineEnding, Markup, Meta, NewAnnotation, ReviewState, Rgb,
-    Shape, Style, StyleChange, TextReplacement,
+    AnnotFont, FLAG_HIDDEN, FLAG_LOCKED, FLAG_NO_ROTATE, FLAG_NO_ZOOM, FLAG_PRINT, LineEnding, Markup, Meta, NewAnnotation, ReviewState, Rgb, Shape,
+    Style, StyleChange, TextReplacement,
 };
 use super::{AnnotError, Dict, Document, HashMap, HashSet, ObjRef, Object, PdfString, appearance};
 
@@ -165,9 +165,8 @@ pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, m
     let (_, r) = annot_ref(doc, page, index)?;
     let free_text = annot_dict(doc, r).name(b"Subtype") == Some(b"FreeText");
     if free_text {
-        let needs_fallback = text
-            .chars()
-            .any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r') && pdfcraft_fonts::fallback_has_char(c));
+        let needs_fallback =
+            text.chars().any(|c| !pdfcraft_fonts::win_ansi_encodable(c) && !matches!(c, '\n' | '\r') && pdfcraft_fonts::fallback_has_char(c));
         let (col, size, font) = appearance::parse_da(&annot_dict(doc, r));
         if font == AnnotFont::Helvetica && needs_fallback {
             if pdfcraft_fonts::embedding::ensure_fallback_font(doc).is_ok() {
@@ -686,7 +685,13 @@ fn refit_box(doc: &mut Document, r: ObjRef, meta: &Meta, before: Dict, new_text:
                 _ => apply_text_box(doc, r, fit, meta, new_text),
             }
         }
-        None => if new_text { draw_appearance(doc, r) } else { redraw_or_restore(doc, r, before.clone()) },
+        None => {
+            if new_text {
+                draw_appearance(doc, r)
+            } else {
+                redraw_or_restore(doc, r, before.clone())
+            }
+        }
     };
     if result.is_err() {
         doc.set(r, Object::Dict(before));
