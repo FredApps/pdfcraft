@@ -38,6 +38,7 @@ pub(crate) struct Fonts<'a> {
     pub sources: Option<&'a [(String, String)]>,
     /// The name the list shows for the current choice.
     pub shown: String,
+    pub mixed_size: bool,
 }
 
 /// Text being typed in, for the alignment buttons: with some of it selected, they show and set the
@@ -125,8 +126,9 @@ pub(crate) fn panel(
     widgets::section_title(ui, tl!("Format text"));
 
     // The font, across the panel.
+    ui.spacing_mut().combo_height = 360.0;
     let width = ui.available_width();
-    craft_ui::ComboBox::from_id_salt("format-font")
+    let font_resp = craft_ui::ComboBox::from_id_salt("format-font")
         .selected_text(fonts.shown.as_str())
         .width(width)
         .show_ui(ui, |ui| {
@@ -152,31 +154,86 @@ pub(crate) fn panel(
                     out.font = Some(FontChoice::Load);
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                ui.menu_button(tl!("Installed fonts…"), |ui| match crate::files::installed_font_files(ui.ctx()) {
-                    Some(list) if list.is_empty() => {
-                        ui.label(tl!("No openly licensed document fonts found. Load a font file."));
-                    }
-                    Some(list) => {
-                        for font in list {
-                            if ui.button(&font.face).clicked() {
-                                out.font = Some(FontChoice::Installed(font.path));
-                                ui.close();
+                ui.menu_button(tl!("Installed fonts…"), |ui| {
+                    ui.set_min_width(260.0);
+                    match crate::files::installed_font_files(ui.ctx()) {
+                        Some(list) if list.is_empty() => {
+                            ui.label(tl!("No openly licensed document fonts found. Load a font file."));
+                        }
+                        Some(list) => {
+                            let search_id = ui.scope_id().with("installed-font-search");
+                            let mut query = ui.data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+                            ui.horizontal(|ui| {
+                                let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                                crate::icons::paint(ui, icon_rect, "search", 13.0, ui.visuals().text_color().gamma_multiply(0.6));
+                                let resp = ui
+                                    .add(egui::TextEdit::singleline(&mut query).hint_text(tl!("Search…")).desired_width(ui.available_width() - 8.0));
+                                if resp.changed() {
+                                    ui.data_mut(|d| d.insert_temp(search_id, query.clone()));
+                                }
+                            });
+                            ui.separator();
+
+                            let query_lower = query.trim().to_lowercase();
+                            let mut families: std::collections::BTreeMap<&str, Vec<&pdfcraft_engine::text_fonts::FontFile>> =
+                                std::collections::BTreeMap::new();
+                            for font in &list {
+                                if query_lower.is_empty()
+                                    || font.family.to_lowercase().contains(&query_lower)
+                                    || font.face.to_lowercase().contains(&query_lower)
+                                {
+                                    families.entry(&font.family).or_default().push(font);
+                                }
+                            }
+
+                            if families.is_empty() {
+                                ui.label(tl!("No openly licensed document fonts found. Load a font file."));
+                            } else {
+                                egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
+                                    for (family, faces) in families {
+                                        if faces.len() == 1 {
+                                            if let Some(&font) = faces.first() {
+                                                let label =
+                                                    if font.face != font.family && !font.face.is_empty() { font.face.as_str() } else { family };
+                                                if ui.button(label).clicked() {
+                                                    out.font = Some(FontChoice::Installed(font.path.clone()));
+                                                    ui.close();
+                                                }
+                                            }
+                                        } else {
+                                            ui.menu_button(family, |ui| {
+                                                ui.set_min_width(180.0);
+                                                for font in faces {
+                                                    let label =
+                                                        font.face.strip_prefix(family).map(str::trim).filter(|s| !s.is_empty()).unwrap_or(&font.face);
+                                                    if ui.button(label).clicked() {
+                                                        out.font = Some(FontChoice::Installed(font.path.clone()));
+                                                        ui.close();
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }
+                                });
                             }
                         }
-                    }
-                    None => {
-                        ui.label(tl!("Finding document fonts…"));
+                        None => {
+                            ui.label(tl!("Finding document fonts…"));
+                        }
                     }
                 });
+                ui.add_space(4.0);
             }
         })
-        .response
-        .on_hover_text(format!("{}\n{}", tl!("Font"), tl!("Thai and Arabic use regular fallback fonts when available.")));
+        .response;
+    font_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tl!("Font")));
+    font_resp.on_hover_text(format!("{}\n{}", tl!("Font"), tl!("Thai and Arabic use regular fallback fonts when available.")));
     ui.add_space(4.0);
 
     // Size and colour | bullets, numbering and alignment.
+    let mut size_committed = false;
     row(ui, |ui| {
-        font_size_input(ui, &mut look.size);
+        size_committed = font_size_input(ui, &mut look.size, fonts.mixed_size);
         let swatch = colour_button(ui, t, look.color);
         egui::Popup::menu(&swatch).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             if let Some(picked) = crate::comments::swatch_grid(ui, Some(look.color)) {
@@ -256,12 +313,17 @@ pub(crate) fn panel(
             labelled_icon(ui, t, "arrow-up-down", tl!("Line spacing"));
             let own = tl!("Auto").to_string();
             let shown = if e.line_spacing == 0.0 { own.clone() } else { number(e.line_spacing) };
-            craft_ui::ComboBox::from_id_salt("format-line-spacing").selected_text(shown).width(half).show_ui(ui, |ui| {
-                ui.selectable_value(&mut e.line_spacing, 0.0, own.as_str());
-                for v in LINE_SPACINGS {
-                    ui.selectable_value(&mut e.line_spacing, v, number(v));
-                }
-            });
+            let spacing_resp = craft_ui::ComboBox::from_id_salt("format-line-spacing")
+                .selected_text(shown)
+                .width(half)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut e.line_spacing, 0.0, own.as_str());
+                    for v in LINE_SPACINGS {
+                        ui.selectable_value(&mut e.line_spacing, v, number(v));
+                    }
+                })
+                .response;
+            spacing_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tl!("Line spacing")));
             ui.add_space(8.0);
             ui.add_enabled_ui(false, |ui| {
                 labelled_icon(ui, t, "pilcrow", tl!("Paragraph spacing"));
@@ -290,7 +352,7 @@ pub(crate) fn panel(
         number_with_presets(ui, spacing, &CHAR_SPACINGS, half, (label.id, tl!("Character spacing")));
     });
 
-    out.changed = (look.clone(), extras.as_deref().copied()) != before;
+    out.changed = size_committed || (look.clone(), extras.as_deref().copied()) != before;
     ui.add_space(6.0);
     ui.separator();
     out
@@ -351,7 +413,8 @@ fn number_with_presets(ui: &mut egui::Ui, n: Number<'_>, presets: &[f64], width:
         ui.spacing_mut().item_spacing.x = 2.0;
         let field = egui::DragValue::new(&mut *n.value).range(n.range).speed(n.speed).max_decimals(2).suffix(n.suffix);
         let height = ui.spacing().interact_size.y;
-        ui.add_sized([(width - PRESET_LIST - 2.0).max(30.0), height], field).labelled_by(label.0);
+        let drag_resp = ui.add_sized([(width - PRESET_LIST - 2.0).max(30.0), height], field).labelled_by(label.0);
+        drag_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::SpinButton, ui.is_enabled(), label.1));
         let list = icons::button(ui, "chevron-down", PRESET_LIST, false, label.1);
         egui::Popup::menu(&list).show(|ui| {
             for &v in presets {
@@ -378,31 +441,43 @@ fn colour_button(ui: &mut egui::Ui, t: &Tokens, color: [f64; 3]) -> egui::Respon
 
 /// Commit a typed size once (Enter or leaving the field), rather than one undo step per key.
 /// The bounds match AddedText validation, so the panel also accepts coloured text below 8 pt.
-fn font_size_input(ui: &mut egui::Ui, size: &mut f64) {
+fn font_size_input(ui: &mut egui::Ui, size: &mut f64, mixed: bool) -> bool {
+    let mut committed = false;
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         let id = ui.make_persistent_id("font-size-input");
-        let (previous, mut text) = ui.data(|d| d.get_temp::<(u64, String)>(id)).unwrap_or_else(|| (size.to_bits(), size.to_string()));
+        let initial_text = || {
+            if mixed || *size <= 0.0 { tl!("Mixed").to_string() } else { size.to_string() }
+        };
+        let (previous, mut text) = ui.data(|d| d.get_temp::<(u64, String)>(id)).unwrap_or_else(|| (size.to_bits(), initial_text()));
         if previous != size.to_bits() {
-            text = size.to_string();
+            text = initial_text();
         }
         let field = egui::TextEdit::singleline(&mut text).id(id).desired_width(40.0);
         let response = ui.add_sized([40.0, ui.spacing().interact_size.y], field).accessible_name(tl!("Font size:"));
         let cancel = (response.has_focus() || response.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape));
         if cancel {
-            text = size.to_string();
+            text = initial_text();
             response.surrender_focus();
         } else if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
             if let Some(value) = typed_font_size(&text) {
+                if mixed || *size != value {
+                    committed = true;
+                }
                 *size = value;
+                text = size.to_string();
+            } else {
+                text = initial_text();
             }
-            text = size.to_string();
         }
         let before = *size;
         let list = icons::button(ui, "chevron-down", PRESET_LIST, false, tl!("Font size"));
         egui::Popup::menu(&list).show(|ui| {
             for value in SIZES {
                 if ui.selectable_label(*size == value, format!("{value} pt")).clicked() {
+                    if mixed || *size != value {
+                        committed = true;
+                    }
                     *size = value;
                     ui.close();
                 }
@@ -413,6 +488,7 @@ fn font_size_input(ui: &mut egui::Ui, size: &mut f64) {
         }
         ui.data_mut(|d| d.insert_temp(id, (size.to_bits(), text)));
     });
+    committed
 }
 
 fn typed_font_size(text: &str) -> Option<f64> {
@@ -452,7 +528,7 @@ mod typed_size_tests {
         let mut h = egui_kittest::Harness::new_ui_state(
             |ui, state: &mut (f64, usize)| {
                 let before = state.0;
-                ui.horizontal(|ui| font_size_input(ui, &mut state.0));
+                ui.horizontal(|ui| font_size_input(ui, &mut state.0, false));
                 if state.0 != before {
                     state.1 += 1;
                 }
@@ -481,7 +557,7 @@ mod typed_size_tests {
         let mut h = egui_kittest::Harness::new_ui_state(
             |ui, state: &mut (f64, usize)| {
                 let before = state.0;
-                ui.horizontal(|ui| font_size_input(ui, &mut state.0));
+                ui.horizontal(|ui| font_size_input(ui, &mut state.0, false));
                 let _ = ui.button("Other control");
                 if state.0 != before {
                     state.1 += 1;
