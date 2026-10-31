@@ -109,5 +109,5 @@ Patterns are heuristic: dates, protocol identifiers and longer number runs are r
 `CodeSet::from_id("foia")?.overlay(&["(b)(6)"])` gives the overlay text for the picked codes.
 Custom code sets aren't supported yet.
 
-Not yet: pattern locales, struct-tree/alt-text cleanup, metadata and hidden-information
-sanitising (M8.4), re-encoding of DCT images (they are removed instead).
+Not yet: pattern locales, struct-tree/alt-text cleanup, re-encoding of DCT images (they are removed
+instead).

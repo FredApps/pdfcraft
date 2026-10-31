@@ -897,14 +897,9 @@ fn a_redacted_jbig2_scan_keeps_neither_its_code_nor_its_globals() {
     }
 }
 
-/// A cleared one-bit image of one component, a scan as a rule, is stored as CCITT Group 4 when
-/// that is smaller than Flate, whatever it was stored as (Flate here), and never as JBIG2 unless it
-/// was JBIG2; an eight-bit image stays Flate. The copy decodes to the cleared samples.
-#[test]
-fn a_cleared_black_and_white_scan_is_stored_as_group_4() {
-    // 800 × 200: lines of word-sized dark blocks 14 rows tall, their edges ragged by a sample from
-    // row to row, as a scan's are; Group 4 codes such rows from the row above.
-    let (w, h) = (800usize, 200usize);
+/// `w` × `h` rows, `w` a multiple of 8: lines of word-sized dark blocks 14 rows tall, their edges
+/// ragged by a sample from row to row, as a scan's are; Group 4 codes such rows from the row above.
+fn ragged_scan(w: usize, h: usize) -> Vec<u8> {
     let stride = w / 8;
     let mut seed = 0x9E37_79B9_7F4A_7C15u64;
     let mut next = move || {
@@ -927,6 +922,17 @@ fn a_cleared_black_and_white_scan_is_stored_as_group_4() {
             x += len + 6 + (next() % 6) as usize;
         }
     }
+    bits
+}
+
+/// A cleared one-bit image of one component, a scan as a rule, is stored as CCITT Group 4 when
+/// that is smaller than Flate, whatever it was stored as (Flate here), and never as JBIG2 unless it
+/// was JBIG2; an eight-bit image stays Flate. The copy decodes to the cleared samples.
+#[test]
+fn a_cleared_black_and_white_scan_is_stored_as_group_4() {
+    let (w, h) = (800usize, 200usize);
+    let stride = w / 8;
+    let bits = ragged_scan(w, h);
     let g4 = pdfcraft_filters::encode_g4(&bits, w as u32, h as u32).unwrap();
     assert!(g4.len() < pdfcraft_filters::encode_flate(&bits).len(), "Group 4 is smaller than Flate here");
     let grey: Vec<u8> = (0..w * h).map(|i| (i % 251) as u8).collect();
@@ -1011,6 +1017,44 @@ fn a_cleared_image_of_more_than_one_bit_stays_flate() {
     let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
     assert_eq!(named_stream(&saved, 0, b"PCRedacted1").unwrap().dict.name(b"Filter"), Some(&b"FlateDecode"[..]));
     assert_eq!(named_image(&saved, 0, b"PCRedacted1").unwrap().get(h * w / 2..), data.get(h * w / 2..), "the rows below the mark are kept");
+}
+
+/// A copy stored as Group 4 or JBIG2 is read like any image: a second redaction, across a save,
+/// clears it again rather than removing it whole, keeps what the first cleared, and stores it
+/// smaller than Flate again.
+#[test]
+fn a_cleared_copy_stored_as_group_4_or_jbig2_can_be_redacted_again() {
+    let (w, h) = (800usize, 200usize);
+    let stride = w / 8;
+    let bits = ragged_scan(w, h);
+    let image = format!("/Type /XObject /Subtype /Image /Width {w} /Height {h} /BitsPerComponent 1 /ColorSpace /DeviceGray");
+    for (filter, data, wanted) in [
+        ("/FlateDecode", pdfcraft_filters::encode_flate(&bits), &b"CCITTFaxDecode"[..]),
+        ("/JBIG2Decode", pdfcraft_filters::encode_jbig2(&bits, w as u32, h as u32).unwrap(), &b"JBIG2Decode"[..]),
+    ] {
+        let dict = format!("{image} /Filter {filter}");
+        let mut doc = one_page(b"q 200 0 0 50 0 100 cm /Im Do Q", "/XObject << /Im 7 0 R >>", vec![stream(&dict, data)]);
+        mark(&mut doc, 0, &[[0.0, 125.0, 50.0, 150.0]], "");
+        assert_eq!(apply(&mut doc, None).unwrap().images_cleared, 1, "{filter}");
+        let mut saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(named_stream(&saved, 0, b"PCRedacted1").unwrap().dict.name(b"Filter"), Some(wanted), "{filter}");
+        mark(&mut saved, 0, &[[150.0, 100.0, 200.0, 125.0]], "");
+        let report = apply(&mut saved, None).unwrap();
+        assert_eq!((report.images_cleared, report.images_removed), (1, 0), "{filter}: cleared again, not removed");
+        let again = Document::open(Arc::new(write_full(&saved, &SaveOptions::default()).unwrap())).unwrap();
+        // Rows 0 to 99 of the left quarter, then 100 to 199 of the right.
+        let mut expected = bits.clone();
+        for (rows, columns) in [(0..100, 0..200), (100..200, 600..800)] {
+            for y in rows {
+                for x in columns.clone() {
+                    expected[y * stride + x / 8] &= !(0x80 >> (x % 8));
+                }
+            }
+        }
+        let names: Vec<Vec<u8>> = (1..4).map(|n| format!("PCRedacted{n}").into_bytes()).collect();
+        let stored = names.iter().find_map(|n| named_image(&again, 0, n));
+        assert_eq!(stored, Some(expected), "{filter}");
+    }
 }
 
 /// Apply Redactions gives the page its own pruned /Resources, but the dictionary it drew through
