@@ -78,12 +78,12 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
     600 ppi page of text that is averaged, Group 4 at 300 ppi is about half the size.
   - **Compression:** CCITT Group 4 (`pdfcraft_filters::encode_g4`), or 1-bit Flate when that is
     smaller, which only a resampled image or one packed from more bits may be: a 1-bit image that
-    is only stored again becomes Group 4 or stays. Group 4 alone is only decoded to be resampled;
+    is only stored again becomes Group 4 or stays. Group 4 alone is only decoded to be resampled, and so is JBIG2 alone when Group 4 is asked for;
     Group 3, or Group 4 inside another filter such as `ASCII85Decode`, is stored again as Group 4
     alone when that is smaller. Damaged Group 3 with end-of-line codes is stored as the decoder
     recovers it, a bad row picked up again at the next code, as it reports no damage there; without
-    them, damage stops the decoding and the image is left alone. JBIG2, alone or inside another
-    filter, is stored again as the compression asks when that is smaller (as JBIG2 symbols where
+    them, damage stops the decoding and the image is left alone. JBIG2 inside another filter, or
+    alone when JBIG2 is asked for, is stored again as the compression asks when that is smaller (as JBIG2 symbols where
     its own coding is a generic region, say); a symbol-coded scan, averaged, loses its exact
     repeats and often comes out larger, and then stays as it is. A JBIG2 image stored again refers to no
     `/JBIG2Globals`, and one whose page isn't its size (PdfCraft's
