@@ -810,6 +810,38 @@ fn acroform_field_fallback_requires_full_coverage() {
     assert!(fonts.get(b"PCFallback").is_some(), "PCFallback should be embedded for Polish text");
 }
 
+/// A form field whose `/DA` references an existing non-fallback Type0 font in `/DR` (with Identity-H
+/// encoding and a ToUnicode map) draws using that font rather than falling back to Helvetica.
+#[test]
+fn non_fallback_type0_dr_font_draws_field() {
+    let to_unicode = "1 beginbfrange <0020> <007E> <0020> endbfrange";
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>".into(),
+        "<< /Fields [6 0 R] /DA (/CustomT0 12 Tf 0 g) /DR << /Font << /CustomT0 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type0 /BaseFont /CustomType0 /Encoding /Identity-H /ToUnicode 7 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (title) /Rect [50 700 450 730] /P 3 0 R >>".into(),
+        format!("<< /Length {} >>\nstream\n{}\nendstream", to_unicode.len(), to_unicode),
+    ];
+    let mut doc = document(&objs);
+    let value = "Hello World";
+    set_value(&mut doc, "title", &FieldValue::Text(value.into())).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let f = field(&all, "title");
+    assert_eq!(f.value, [value]);
+    assert_eq!(undrawn_fields(&doc), Vec::<(String, char)>::new());
+    assert!(dr_fonts(&doc).get(b"PCFallback").is_none(), "no fallback font needed when DR font covers text");
+    let (font, lines) = appearance_text(&doc, &f.widgets[0], b"CustomT0");
+    let font = font.as_dict().unwrap();
+    assert_eq!(font.name(b"Subtype"), Some(&b"Type0"[..]));
+    assert_eq!(font.name(b"BaseFont"), Some(&b"CustomType0"[..]));
+    let metrics = pdfcraft_fonts::pdf::Metrics::from_dict(&doc, font);
+    let shown = lines.concat();
+    assert_eq!(metrics.decode(&shown), value);
+}
+
 #[test]
 fn multiline_wrapping_keeps_encodable_text_without_requiring_ascii_space() {
     let objs: Vec<String> = vec![

@@ -536,6 +536,16 @@ impl AnnotFont {
         }
     }
 
+    /// The CSS/rich-text font name for `/RC` and `/DS`.
+    pub fn rich_text_font(self) -> &'static str {
+        match self {
+            AnnotFont::Helvetica => "Helvetica",
+            AnnotFont::Times => "Times-Roman",
+            AnnotFont::Courier => "Courier",
+            AnnotFont::Inter => "Inter",
+        }
+    }
+
     /// Resolve an [`AnnotFont`] from a `/DA` font resource name or base font.
     pub fn from_resource(n: &str) -> AnnotFont {
         match n {

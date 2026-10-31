@@ -38,7 +38,7 @@ pub(crate) fn n(v: f64) -> String {
 /// plain `/Contents`, `/DA` and `/Q`, so viewers that edit rich text show the same thing.
 pub(crate) fn rich_text(d: &mut Dict) {
     let text = d.get(b"Contents").and_then(|c| c.as_string()).map(PdfString::to_text).unwrap_or_default();
-    let (col, size, _) = appearance::parse_da(d);
+    let (col, size, font) = appearance::parse_da(d);
     let hex = format!(
         "#{:02X}{:02X}{:02X}",
         (col[0].clamp(0.0, 1.0) * 255.0).round() as u8,
@@ -52,14 +52,15 @@ pub(crate) fn rich_text(d: &mut Dict) {
     };
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
     let body: String = text.split('\n').map(|line| format!("<p dir=\"ltr\">{}</p>", esc(line.trim_end_matches('\r')))).collect();
+    let font_name = font.rich_text_font();
     let style = format!(
-        "font-size:{}pt;text-align:{align};color:{hex};font-weight:normal;font-style:normal;font-family:Helvetica;font-stretch:normal",
+        "font-size:{}pt;text-align:{align};color:{hex};font-weight:normal;font-style:normal;font-family:{font_name};font-stretch:normal",
         n(size)
     );
     let rc = format!(
         "<?xml version=\"1.0\"?><body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:spec=\"2.0.2\" style=\"{style}\">{body}</body>"
     );
-    d.set(b"DS".to_vec(), PdfString::text(&format!("font: Helvetica {}pt; text-align:{align}; color:{hex}", n(size))));
+    d.set(b"DS".to_vec(), PdfString::text(&format!("font: {font_name} {}pt; text-align:{align}; color:{hex}", n(size))));
     d.set(b"RC".to_vec(), PdfString::text(&rc));
 }
 
@@ -224,43 +225,8 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
         rect
     };
     let (x0, top) = (tb[0].min(tb[2]), tb[1].max(tb[3]));
-    let fallback_metrics = if font == AnnotFont::Inter {
-        let r = pdfcraft_fonts::embedding::fallback_font_ref(doc).or_else(|| {
-            doc.scan_objects().find_map(|(r, obj)| {
-                if let Object::Dict(fd) = obj.as_ref()
-                    && fd.get(b"PCFallback") == Some(&Object::Bool(true))
-                {
-                    return Some(r);
-                }
-                None
-            })
-        });
-        r.and_then(|r| {
-            let fd = doc.get(r);
-            Some(pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd.as_dict()?))
-        })
-    } else {
-        None
-    };
-    let measure = |s: &str, sz: f64| {
-        if let Some(metrics) = &fallback_metrics {
-            let q_code = metrics.encode("?").unwrap_or_default();
-            let space_code = metrics.encode(" ").unwrap_or_default();
-            let mut codes = Vec::with_capacity(s.len() * 2);
-            let mut buf = [0u8; 4];
-            for ch in s.chars() {
-                if ch == '\t' {
-                    codes.extend_from_slice(&space_code);
-                } else if let Some(code) = metrics.encode(ch.encode_utf8(&mut buf)) {
-                    codes.extend_from_slice(&code);
-                } else {
-                    codes.extend_from_slice(&q_code);
-                }
-            }
-            return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
-        }
-        font.text_width(s, sz)
-    };
+    let fallback_info = appearance::fallback_font_info(Some(doc), font);
+    let measure = |s: &str, sz: f64| appearance::measure_text(font, fallback_info.as_ref().map(|(_, m)| m), s, sz);
     let w = tb[2] - tb[0];
     let w = if w.is_finite() && w >= 1.0 {
         w

@@ -428,7 +428,7 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
     let can_fallback = |s: &str| pdfcraft_fonts::first_undrawable(s).is_some() && pdfcraft_fonts::first_undrawable_with_fallback(s).is_none();
     let needs_fallback = test_values.iter().any(|v| can_fallback(v)) || f.options.iter().any(|(_, d)| can_fallback(d));
     if needs_fallback {
-        let _ = crate::author::ensure_fallback_font(doc);
+        crate::author::ensure_fallback_font(doc)?;
     }
     let in_place = f.kind == FieldKind::Text && f.has(flags::PASSWORD);
     let mut undrawn = false;

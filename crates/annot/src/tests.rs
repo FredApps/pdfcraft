@@ -706,6 +706,8 @@ fn text_box_font_changes_the_da_and_appearance() {
     set_font(&mut doc, 0, t, AnnotFont::Times, &meta("")).unwrap();
     let d = &list(&doc, 0)[t];
     assert_eq!(text(d, b"DA"), "1 0 0 rg /TiRo 12 Tf");
+    assert!(text(d, b"DS").contains("font: Times-Roman 12pt"));
+    assert!(text(d, b"RC").contains("font-family:Times-Roman"));
     let ap = ap_content(&doc, d);
     assert!(ap.contains("/TiRo 12 Tf"), "appearance uses /TiRo: {ap}");
     assert_eq!(props(&doc, 0, t).unwrap().font, Some(AnnotFont::Times));
@@ -714,6 +716,8 @@ fn text_box_font_changes_the_da_and_appearance() {
     set_font(&mut doc, 0, t, AnnotFont::Courier, &meta("")).unwrap();
     let d = &list(&doc, 0)[t];
     assert_eq!(text(d, b"DA"), "1 0 0 rg /Cour 12 Tf");
+    assert!(text(d, b"DS").contains("font: Courier 12pt"));
+    assert!(text(d, b"RC").contains("font-family:Courier"));
     let ap = ap_content(&doc, d);
     assert!(ap.contains("/Cour 12 Tf"), "appearance uses /Cour: {ap}");
     assert_eq!(props(&doc, 0, t).unwrap().font, Some(AnnotFont::Courier));

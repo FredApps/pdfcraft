@@ -10,7 +10,7 @@
 //! Helvetica font with WinAnsi encoding; line breaking uses [`text_width`], an approximation of
 //! Helvetica's proportions by character class (no font program or metrics file is bundled).
 
-use pdfcraft_cos::{Dict, Document, Object, PdfString, Stream};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 use pdfcraft_fonts::{first_undrawable, first_undrawable_with_fallback, literal, win_ansi, wrap_with};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
 
@@ -906,6 +906,54 @@ fn draw_stamp(context: &AppearanceContext<'_>, mut drawing: AppearanceDrawing) -
     Some(form(rect, c.as_bytes(), res))
 }
 
+/// The object reference and parsed metrics for the fallback CIDFont (/PCFallback) if `annot_font` is Inter.
+pub(crate) fn fallback_font_info(doc: Option<&Document>, annot_font: AnnotFont) -> Option<(ObjRef, pdfcraft_fonts::pdf::Metrics)> {
+    if annot_font != AnnotFont::Inter {
+        return None;
+    }
+    let doc = doc?;
+    let r = pdfcraft_fonts::embedding::fallback_font_ref(doc).or_else(|| {
+        doc.scan_objects().find_map(|(r, obj)| {
+            if let Object::Dict(fd) = obj.as_ref()
+                && fd.get(b"PCFallback") == Some(&Object::Bool(true))
+            {
+                return Some(r);
+            }
+            None
+        })
+    })?;
+    let fd = doc.get(r);
+    let fd = fd.as_dict()?;
+    Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)))
+}
+
+/// Encode string `s` using the fallback font's metrics, replacing tabs with spaces and missing glyphs with '?'.
+pub(crate) fn encode_fallback(metrics: &pdfcraft_fonts::pdf::Metrics, s: &str) -> Vec<u8> {
+    let q_code = metrics.encode("?").unwrap_or_default();
+    let space_code = metrics.encode(" ").unwrap_or_default();
+    let mut out = Vec::with_capacity(s.len() * 2);
+    let mut buf = [0u8; 4];
+    for ch in s.chars() {
+        if ch == '\t' {
+            out.extend_from_slice(&space_code);
+        } else if let Some(code) = metrics.encode(ch.encode_utf8(&mut buf)) {
+            out.extend_from_slice(&code);
+        } else {
+            out.extend_from_slice(&q_code);
+        }
+    }
+    out
+}
+
+/// Calculate text advance width in `annot_font` at `sz` points, using fallback metrics when present.
+pub(crate) fn measure_text(annot_font: AnnotFont, fallback_metrics: Option<&pdfcraft_fonts::pdf::Metrics>, s: &str, sz: f64) -> f64 {
+    if let Some(metrics) = fallback_metrics {
+        let codes = encode_fallback(metrics, s);
+        return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
+    }
+    annot_font.text_width(s, sz)
+}
+
 fn draw_free_text(doc: Option<&Document>, context: &AppearanceContext<'_>, mut drawing: AppearanceDrawing) -> Option<Stream> {
     let d = context.dict;
     let rect = context.rect;
@@ -914,25 +962,7 @@ fn draw_free_text(doc: Option<&Document>, context: &AppearanceContext<'_>, mut d
     let mut res = std::mem::take(&mut drawing.resources);
     let _tail = std::mem::take(&mut drawing.tail);
     let (text_color, size, annot_font) = parse_da(d);
-    let fallback_info = if annot_font == AnnotFont::Inter {
-        doc.and_then(|doc| {
-            let r = pdfcraft_fonts::embedding::fallback_font_ref(doc).or_else(|| {
-                doc.scan_objects().find_map(|(r, obj)| {
-                    if let Object::Dict(fd) = obj.as_ref()
-                        && fd.get(b"PCFallback") == Some(&Object::Bool(true))
-                    {
-                        return Some(r);
-                    }
-                    None
-                })
-            })?;
-            let fd = doc.get(r);
-            let fd = fd.as_dict()?;
-            Some((r, pdfcraft_fonts::pdf::Metrics::from_dict(doc, fd)))
-        })
-    } else {
-        None
-    };
+    let fallback_info = fallback_font_info(doc, annot_font);
     let bg = stroke;
     let bw = if d.contains(b"BS") || d.contains(b"Border") { border_width(d) } else { 0.0 };
     // A callout: the leader line (arrowhead at its first point), and the text box inside
@@ -1026,29 +1056,7 @@ fn draw_free_text(doc: Option<&Document>, context: &AppearanceContext<'_>, mut d
             (format!("/{}", annot_font.resource()), fonts)
         }
     };
-    let encode_fallback = |metrics: &pdfcraft_fonts::pdf::Metrics, s: &str| -> Vec<u8> {
-        let q_code = metrics.encode("?").unwrap_or_default();
-        let space_code = metrics.encode(" ").unwrap_or_default();
-        let mut out = Vec::with_capacity(s.len() * 2);
-        let mut buf = [0u8; 4];
-        for ch in s.chars() {
-            if ch == '\t' {
-                out.extend_from_slice(&space_code);
-            } else if let Some(code) = metrics.encode(ch.encode_utf8(&mut buf)) {
-                out.extend_from_slice(&code);
-            } else {
-                out.extend_from_slice(&q_code);
-            }
-        }
-        out
-    };
-    let measure = |s: &str, sz: f64| {
-        if let Some((_, metrics)) = &fallback_info {
-            let codes = encode_fallback(metrics, s);
-            return metrics.codes(&codes).into_iter().map(|(c, _)| metrics.width(c)).sum::<f64>() * sz;
-        }
-        annot_font.text_width(s, sz)
-    };
+    let measure = |s: &str, sz: f64| measure_text(annot_font, fallback_info.as_ref().map(|(_, m)| m), s, sz);
     let lines = wrap_with(&text, size, width, measure);
     c.push_str(&format!(
         "{} {} {} {} re W n\nBT\n{} {} Tf\n{}",
