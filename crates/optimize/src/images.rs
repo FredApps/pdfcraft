@@ -1,6 +1,7 @@
 //! Image resampling and recompression.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use pdfcraft_content::{Matrix, Pieces};
 use pdfcraft_cos::{DecodeBudget, Dict, Document, ObjRef, Object, Stream};
@@ -305,7 +306,12 @@ fn device_rgb(doc: &Document, r: ObjRef) -> bool {
 fn indexed(doc: &Document, r: ObjRef) -> bool {
     let Object::Stream(s) = &*doc.get(r) else { return false };
     let cs = s.dict.get(b"ColorSpace").map(|cs| doc.resolve(cs));
-    matches!(cs.as_deref(), Some(Object::Array(a)) if matches!(a.first().and_then(Object::as_name), Some(b"Indexed" | b"I")))
+    matches!(cs.as_deref(), Some(Object::Array(a)) if matches!(family(doc, a).as_deref().and_then(Object::as_name), Some(b"Indexed")))
+}
+
+/// The first entry of colour space array `a`, its family, read through a reference.
+fn family(doc: &Document, a: &[Object]) -> Option<Arc<Object>> {
+    a.first().map(|f| doc.resolve(f))
 }
 
 /// Call `f` with every reference in `o`, a dictionary's or array's included, a stream's dictionary
@@ -762,7 +768,7 @@ fn one_component(doc: &Document, cs: &Object) -> bool {
     let cs = doc.resolve(cs);
     match &*cs {
         Object::Name(n) => matches!(n.as_slice(), b"DeviceGray" | b"G"),
-        Object::Array(a) => match a.first().and_then(Object::as_name) {
+        Object::Array(a) => match family(doc, a).as_deref().and_then(Object::as_name) {
             Some(b"CalGray" | b"Separation" | b"Indexed" | b"I") => true,
             Some(b"ICCBased") => a.get(1).is_some_and(|icc| matches!(&*doc.resolve(icc), Object::Stream(s) if s.dict.int(b"N") == Some(1))),
             Some(b"DeviceN") => a.get(1).is_some_and(|names| doc.resolve(names).as_array().is_some_and(|n| n.len() == 1)),
@@ -836,7 +842,7 @@ fn one_bit(doc: &Document, s: &Stream, pack: bool, defaults: bool) -> Option<(Ve
     packed.set(b"BitsPerComponent".to_vec(), Object::Int(1));
     // Components a pixel, bits a component, and a pixel's samples as 1 or 0.
     let (n, bpc, white): (usize, usize, Pixel) = match &*doc.resolve(cs) {
-        Object::Array(a) if matches!(a.first().and_then(Object::as_name), Some(b"Indexed" | b"I")) => {
+        Object::Array(a) if matches!(family(doc, a).as_deref().and_then(Object::as_name), Some(b"Indexed" | b"I")) => {
             let bpc = bits.filter(|b| matches!(b, 2 | 4 | 8))?;
             match decode.as_deref() {
                 None => {}
@@ -936,10 +942,18 @@ fn dark_is_one(doc: &Document, d: &Dict) -> Option<bool> {
     if matches!(d.get(b"ImageMask"), Some(Object::Bool(true))) {
         return Some(d1 < d0);
     }
+    // A colour key can hide the dark sample, and a tie going to it would lose a thin rule of the
+    // sample that shows.
+    if matches!(d.get(b"Mask").map(|m| doc.resolve(m)).as_deref(), Some(Object::Array(_))) {
+        return None;
+    }
     match d.get(b"ColorSpace").map(|cs| doc.resolve(cs)).as_deref() {
         Some(Object::Name(n)) if matches!(n.as_slice(), b"DeviceGray" | b"G") => Some(d1 < d0),
-        Some(Object::Array(a)) if matches!(a.first().and_then(Object::as_name), Some(b"Indexed" | b"I")) => {
-            let hival = a.get(2).and_then(|v| doc.resolve(v).as_int()).filter(|h| (0..=255).contains(h))?;
+        Some(Object::Array(a)) if matches!(family(doc, a).as_deref().and_then(Object::as_name), Some(b"Indexed")) => {
+            let hival = a.get(2).and_then(|v| match &*doc.resolve(v) {
+                Object::Int(h) if (0..=255).contains(h) => Some(*h),
+                _ => None,
+            })?;
             // `hival` is 0 to 255, and the rounded value is clipped to it: the cast can't wrap.
             let entry = |v: f64| v.round().clamp(0.0, hival as f64) as usize;
             let (l0, l1) = (lightness(doc, a, entry(d0))?, lightness(doc, a, entry(d1))?);
@@ -949,21 +963,31 @@ fn dark_is_one(doc: &Document, d: &Dict) -> Option<bool> {
     }
 }
 
+/// The most bytes a palette is read to (see [`lightness`]).
+const MAX_PALETTE: usize = 4096;
+
 /// How light entry `i` of the palette of indexed colour space `a` (`[/Indexed base hival lookup]`)
 /// is, from 0 (black) to 255,000 (white): its grey, or its luma (Rec. 601) over `DeviceRGB`. Only
 /// those two bases count, where the palette's values are the colour: under `/DefaultGray` or
 /// `/DefaultRGB` they aren't, and the caller asks for no polarity there; `None` for another base
 /// (calibrated, CMYK, an ICC profile, a resource name), and for an entry the table doesn't hold.
 fn lightness(doc: &Document, a: &[Object], i: usize) -> Option<u32> {
-    let n = match doc.resolve(a.get(1)?).as_name()? {
+    // A device space is its name, or that name alone in an array.
+    let base = doc.resolve(a.get(1)?);
+    let base = match &*base {
+        Object::Array(b) if b.len() == 1 => doc.resolve(b.first()?),
+        _ => base,
+    };
+    let n = match base.as_name()? {
         b"DeviceGray" => 1,
         b"DeviceRGB" => 3,
         _ => return None,
     };
-    // At most 256 entries of three components: a stream decoding to more is no palette.
+    // At most 256 entries of three components: more is no palette. Images share a table, and this
+    // is read for each of them, so a large one is refused before it's copied or decoded.
     let table = match &*doc.resolve(a.get(3)?) {
-        Object::String(s) => s.bytes.clone(),
-        Object::Stream(s) => doc.with_direct_parms(s).decoded_within(4096).ok()?,
+        Object::String(s) if s.bytes.len() <= MAX_PALETTE => s.bytes.clone(),
+        Object::Stream(s) if s.raw.len() <= 4 * MAX_PALETTE => doc.with_direct_parms(s).decoded_within(MAX_PALETTE).ok()?,
         _ => return None,
     };
     let c: Vec<u32> = table.get(i.checked_mul(n)?..i.checked_mul(n)?.checked_add(n)?)?.iter().map(|v| u32::from(*v)).collect();
@@ -1090,8 +1114,8 @@ fn mono(doc: &Document, s: &Stream, ppi: f64, defaults: bool, settings: &MonoSet
     } else {
         (w, h)
     };
-    let polarity = if defaults { None } else { dark_is_one(doc, packed.as_ref().unwrap_or(d)) };
-    let averaged = if (nw, nh) != (w, h) && polarity.is_some() {
+    let polarity = if defaults || (nw, nh) == (w, h) { None } else { dark_is_one(doc, packed.as_ref().unwrap_or(d)) };
+    let averaged = if polarity.is_some() {
         // The dark sample of the image as it ends up: packed RGB is grey, with grey's decode pair.
         let (out, mixed, local_tone) = downsample_bits_checked(&data, w, h, nw, nh, polarity?)?;
         // A halftone or dither: most new pixels cover both samples. Text covers both only along
