@@ -3678,17 +3678,25 @@ fn an_indexed_image_is_averaged_only_in_a_spelling_it_can_read() {
     assert_eq!(width(&|_| vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), Object::Real(1.0), table()))]), kept, "a real hival");
     let long = Object::String(pdfcraft_cos::PdfString::literal([vec![0, 0, 0, 255, 255, 255], vec![0; 4097]].concat()));
     assert_eq!(width(&|_| vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), 1.into(), long.clone()))]), kept, "a string past a palette");
+    // 16 KiB of raw data is all a table may take, whatever it decodes to.
     let mut d = Dict::new();
     d.set(b"Filter".to_vec(), Object::name("ASCIIHexDecode"));
-    let hex: Vec<u8> = b"000000FFFFFF".iter().copied().chain(std::iter::repeat_n(b' ', 16385)).chain(*b">").collect();
-    assert_eq!(
-        width(&|doc: &mut Document| {
-            let large = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(d.clone(), hex.clone())));
-            vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), 1.into(), Object::Ref(large)))]
-        }),
-        kept,
-        "a stream too large to be read for each image, whatever it decodes to"
-    );
+    let table_of = |raw: usize| {
+        let d = d.clone();
+        let hex: Vec<u8> = b"000000FFFFFF".iter().copied().chain(std::iter::repeat_n(b' ', raw - 13)).chain(*b">").collect();
+        move |doc: &mut Document| doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(d.clone(), hex.clone())))
+    };
+    for (raw, expected) in [(16384, averaged), (16385, kept)] {
+        let add = table_of(raw);
+        assert_eq!(
+            width(&|doc: &mut Document| {
+                let table = add(doc);
+                vec![("ColorSpace", indexed(Object::name("Indexed"), rgb(), 1.into(), Object::Ref(table)))]
+            }),
+            expected,
+            "a stream of {raw} bytes"
+        );
+    }
     let key = || Object::Array(vec![0.into(), 0.into()]);
     assert_eq!(width(&|_| vec![("ColorSpace", plain()), ("Mask", key())]), kept, "a colour key, indexed");
     assert_eq!(width(&|_| vec![("ColorSpace", Object::name("DeviceGray")), ("Mask", key())]), kept, "a colour key, grey");
