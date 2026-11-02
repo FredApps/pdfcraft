@@ -2810,3 +2810,4 @@ certificate	Version	وەشان
 	Export this PDF	هەناردەکردنی ئەم PDF ـە
 	Find text or tools	دۆزینەوەی دەق یان ئامراز
 	Crop image	بڕینەوەی وێنە
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	فۆنتی واژۆ ناتوانێت «{c}» ({code}) بکێشێت. بە پیتی لاتینی، سیریلی یان یۆنانی بینووسە، یان «وێنەکێشان» یان «وێنە» بەکاربهێنە.

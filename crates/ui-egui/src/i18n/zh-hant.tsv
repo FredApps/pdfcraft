@@ -2567,3 +2567,4 @@ animation effects	Off	關
 	No image on clipboard to paste	剪貼簿中沒有可貼上的影像
 	Pinned {tool} to Home	已將 {tool} 釘選至首頁
 	Unpinned {tool} from Home	已從首頁取消釘選 {tool}
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	簽名字型無法顯示「{c}」（{code}）。請以拉丁、西里爾或希臘字母輸入，或改用「繪製」或「圖片」。

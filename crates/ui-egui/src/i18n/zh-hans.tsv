@@ -2581,3 +2581,4 @@ animation effects	Off	关
 	No image on clipboard to paste	剪贴板中没有可粘贴的图像
 	Pinned {tool} to Home	已将 {tool} 固定到主页
 	Unpinned {tool} from Home	已从主页取消固定 {tool}
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	签名字体无法显示“{c}”（{code}）。请使用拉丁、西里尔或希腊字母输入，或改用“绘制”或“图像”。

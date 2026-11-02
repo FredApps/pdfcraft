@@ -2940,3 +2940,4 @@ theme	Appearance	Aspecto
 	No image on clipboard to paste	No hay ninguna imagen en el portapapeles para pegar
 	Pinned {tool} to Home	{tool} fijado en Inicio
 	Unpinned {tool} from Home	{tool} desfijado de Inicio
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	La fuente de la firma no puede mostrar «{c}» ({code}). Escríbelo con letras latinas, cirílicas o griegas, o usa «Dibujar» o «Imagen».
