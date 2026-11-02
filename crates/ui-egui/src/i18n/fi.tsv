@@ -2886,3 +2886,4 @@ theme	Appearance	Teema
 	No image on clipboard to paste	Leikepöydällä ei ole liitettävää kuvaa
 	Pinned {tool} to Home	{tool} kiinnitetty aloitussivulle
 	Unpinned {tool} from Home	{tool} irrotettu aloitussivulta
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	Allekirjoitusfontti ei pysty piirtämään merkkiä ”{c}” ({code}). Kirjoita se latinalaisin, kyrillisin tai kreikkalaisin kirjaimin tai käytä vaihtoehtoa Piirrä tai Kuva.

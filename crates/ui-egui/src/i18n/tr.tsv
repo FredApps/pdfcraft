@@ -2613,3 +2613,4 @@ animation effects	Off	Kapalı
 	No image on clipboard to paste	Panoda yapıştırılacak görüntü yok
 	Pinned {tool} to Home	{tool} Ana Sayfaya sabitlendi
 	Unpinned {tool} from Home	{tool} Ana Sayfadan kaldırıldı
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	İmza yazı tipi “{c}” ({code}) karakterini çizemez. Latin, Kiril veya Yunan harfleriyle yazın ya da “Çiz” veya “Resim” seçeneğini kullanın.

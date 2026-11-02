@@ -2776,3 +2776,4 @@ theme	Appearance	ลักษณะที่ปรากฏ
 	Export this PDF	ส่งออก PDF นี้
 	Find text or tools	ค้นหาข้อความหรือเครื่องมือ
 	Crop image	ครอบตัดรูปภาพ
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	แบบอักษรลายเซ็นวาด “{c}” ({code}) ไม่ได้ พิมพ์ด้วยตัวอักษรละติน ซีริลลิก หรือกรีก หรือใช้ “วาด” หรือ “รูปภาพ”
