@@ -2892,3 +2892,4 @@ certificate	Version	الإصدار
 	No image on clipboard to paste	لا توجد صورة في الحافظة للصقها
 	Pinned {tool} to Home	تم تثبيت {tool} في الرئيسية
 	Unpinned {tool} from Home	تم إلغاء تثبيت {tool} من الرئيسية
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	لا يستطيع خط التوقيع رسم «{c}» ({code}). اكتبه بحروف لاتينية أو كيريلية أو يونانية، أو استخدم «رسم» أو «صورة».

@@ -2713,3 +2713,4 @@ animation effects	Off	Wyłączone
 	No image on clipboard to paste	Brak obrazu do wklejenia w schowku
 	Pinned {tool} to Home	Przypięto {tool} do strony głównej
 	Unpinned {tool} from Home	Odpięto {tool} od strony głównej
+	The signature font can't draw “{c}” ({code}). Type it in Latin, Cyrillic or Greek letters, or use Draw or Image.	Czcionka podpisu nie obsługuje znaku „{c}” ({code}). Wpisz go literami łacińskimi, cyrylicą lub greckimi albo użyj opcji „Rysuj” lub „Obraz”.
