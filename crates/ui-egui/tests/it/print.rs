@@ -1585,7 +1585,8 @@ fn adding_custom_paper_overrides_pending_driver_default() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(h.state().print_draft.paper_name(), "Card");
-    assert_eq!(h.state().print_draft.paper_size(), (300.0, 500.0));
+    let (w, h_pts) = h.state().print_draft.paper_size();
+    assert!((w - 300.0).abs() < 0.01 && (h_pts - 500.0).abs() < 0.01);
     h.state_mut().open_print();
     settle(&mut h);
     assert_eq!(h.state().print_draft.paper_name(), "Card", "reopening keeps the explicit choice");
@@ -1595,7 +1596,7 @@ fn adding_custom_paper_overrides_pending_driver_default() {
 #[test]
 fn a_named_custom_paper_requests_its_dimensions_from_the_spooler() {
     let mut d = pdfcraft_ui_egui::PrintDraft::default();
-    d.add_custom_paper(pdfcraft_ui_egui::CustomPaper::new("Card", 300.0, 500.0).unwrap());
+    d.add_custom_paper(serde_json::from_value(serde_json::json!({"name": "Card", "width": 300.0, "height": 500.0})).unwrap());
     assert_eq!(d.job("card.pdf").options, [("media".to_string(), "Custom.300x500".to_string())]);
 }
 
