@@ -466,6 +466,8 @@ pub fn printer_papers(printer: &str) -> Vec<Paper> {
 
 #[cfg(windows)]
 fn printer_papers_internal(printer: &str) -> Vec<Paper> {
+    #[cfg(test)]
+    PRINTER_BACKEND_CALLS.with(|c| c.set(c.get().saturating_add(1)));
     use winprint::ticket::{FeatureOptionPack as _, FeatureOptionPackWithPredefined as _};
     let Ok(devices) = winprint::printer::PrinterDevice::all() else { return Vec::new() };
     let Some(device) = devices.into_iter().find(|d| d.name() == printer) else { return Vec::new() };
