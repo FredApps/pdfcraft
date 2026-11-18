@@ -507,7 +507,7 @@ fn email_at(chars: &[char], start: usize) -> Option<(usize, String)> {
 /// stop near 2,000). Each address it might be is read this far at most, so text whose brackets
 /// never close (`https://a/(https://a/(…`, without a space) costs this much per address in it,
 /// not a pass over the rest of the page each.
-const MAX_URL_CHARS: usize = 2048;
+const MAX_URL_CHARS: usize = 4096;
 
 /// Find web addresses in text: `http(s)://…`, `www.…` and bare e-mail addresses become
 /// `mailto:`. Returns character ranges and the URI for each.
